@@ -1,0 +1,28 @@
+# CI matrix 3: ephemeral — no PVC, no ingress.
+#
+# This is what the kind smoke test installs. It must render
+# `strategy: RollingUpdate`, since with an emptyDir there is no volume to
+# contend over and rolling is strictly better.
+config:
+  baseURL: http://onetime.localtest.me
+
+masterKey:
+  value: "v1:Y2ktb25seS1rZXktZG8tbm90LXVzZS1hbnl3aGVyZQ=="
+
+redis:
+  mode: sidecar
+
+persistence:
+  enabled: false
+
+ingress:
+  enabled: false
+
+networkPolicy:
+  enabled: true
+
+# No Prometheus Operator CRDs in a bare kind cluster.
+serviceMonitor:
+  enabled: false
+prometheusRule:
+  enabled: false

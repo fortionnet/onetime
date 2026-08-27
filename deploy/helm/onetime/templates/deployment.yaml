@@ -1,0 +1,307 @@
+{{- include "onetime.validate" . -}}
+{{- $keyPath := include "onetime.masterKeyPath" . -}}
+{{- $keyFile := .Values.masterKey.fileName -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "onetime.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "onetime.labels" . | nindent 4 }}
+spec:
+  # Always 1. See values.yaml and the guard in _helpers.tpl.
+  replicas: {{ .Values.replicaCount }}
+
+  # Derived from persistence.enabled, deliberately not a user-facing knob:
+  # RollingUpdate against a ReadWriteOnce volume deadlocks on Multi-Attach.
+  strategy:
+    {{- include "onetime.strategy" . | nindent 4 }}
+
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "onetime.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Roll the pod when the rendered config or the keyring changes.
+        # Without these, `helm upgrade` updates the ConfigMap and the running
+        # process keeps the old values forever - the deploy "succeeds" and
+        # changes nothing, which is the worst kind of green.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret-masterkey.yaml") . | sha256sum }}
+        kubectl.kubernetes.io/default-container: onetime
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "onetime.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "onetime.serviceAccountName" . }}
+      # No API access needed, so no token to steal.
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+
+      # Long enough for an in-flight 50 MiB download to a slow client to
+      # finish. Must exceed config.shutdownTimeout, or the kubelet SIGKILLs the
+      # process while it is still draining and the user gets a truncated file
+      # with no error.
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+
+      initContainers:
+        # This container exists because of two Kubernetes behaviours that
+        # cannot be worked around from a distroless image with no shell:
+        #
+        # 1. subPath directories are created by kubelet as root:root 0755,
+        #    AFTER fsGroup has been applied to the volume. A non-root app
+        #    therefore cannot write inside a freshly created subPath. Creating
+        #    the directories here, as uid 65532, fixes ownership for good.
+        #
+        # 2. Secret volumes are mounted root:<fsGroup>, and whenever fsGroup is
+        #    set kubelet ORs group-read into the mode - so `defaultMode: 0400`
+        #    still lands as 0440 on disk. The app refuses to start on anything
+        #    group- or world-readable. Copying the file as uid 65532 and
+        #    chmodding it to 0400 satisfies both sides.
+        - name: init-fs
+          image: {{ include "onetime.initImage" . }}
+          imagePullPolicy: {{ .Values.initImage.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+
+              # Blobs and tmp share one directory tree so that the
+              # write-then-rename path stays inside a single filesystem.
+              mkdir -p /mnt/data/app/blobs /mnt/data/app/tmp
+              chmod 0700 /mnt/data/app /mnt/data/app/blobs /mnt/data/app/tmp
+              {{- if eq .Values.redis.mode "sidecar" }}
+              mkdir -p /mnt/data/redis
+              chmod 0700 /mnt/data/redis
+              {{- end }}
+              {{- if .Values.masterKey.hardenPermissions }}
+
+              # Memory-backed destination: the keyring never touches a disk.
+              cp /mnt/keysrc/{{ include "onetime.masterKeySecretKey" . }} /mnt/key/{{ $keyFile }}
+              chmod 0400 /mnt/key/{{ $keyFile }}
+              test "$(stat -c '%a' /mnt/key/{{ $keyFile }})" = "400"
+              {{- end }}
+
+              echo "init-fs ok"
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources.init | nindent 12 }}
+          volumeMounts:
+            # Mounted at the volume ROOT, without subPath - that is the whole
+            # point: the subPath directories do not exist yet.
+            - name: data
+              mountPath: /mnt/data
+            {{- if .Values.masterKey.hardenPermissions }}
+            - name: master-key-src
+              mountPath: /mnt/keysrc
+              readOnly: true
+            - name: master-key
+              mountPath: /mnt/key
+            {{- end }}
+
+      containers:
+        - name: onetime
+          image: {{ include "onetime.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.listenPort }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.config.metricsPort }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "onetime.fullname" . }}-config
+          {{- if .Values.probes.startup.enabled }}
+          # /healthz has no dependencies, so a slow Redis does not stop the pod
+          # from finishing startup - readiness is what gates traffic.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+            timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
+          {{- end }}
+          {{- if .Values.probes.liveness.enabled }}
+          # Deliberately /healthz and NOT /readyz. Pointing liveness at a
+          # dependency check turns a 30-second Redis blip into a pod restart,
+          # which does not fix Redis and does kill every in-flight upload.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          {{- end }}
+          {{- if .Values.probes.readiness.enabled }}
+          # /readyz verifies Redis and the data volume. Failing it removes the
+          # pod from the Service, which is the correct response to a broken
+          # dependency: serve nothing rather than serve wrong.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+            successThreshold: {{ .Values.probes.readiness.successThreshold }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources.app | nindent 12 }}
+          volumeMounts:
+            # subPath `app` keeps the Redis AOF out of the blob tree. Both
+            # /data/blobs and /data/tmp live under this one mount, which is
+            # what makes the tmp->blobs rename atomic.
+            - name: data
+              mountPath: /data
+              subPath: app
+            # readOnlyRootFilesystem needs a writable /tmp. It is tmpfs, not
+            # disk: anything transiently written here is plaintext, and
+            # plaintext must not survive a power cut.
+            - name: tmp
+              mountPath: /tmp
+            - name: {{ if .Values.masterKey.hardenPermissions }}master-key{{ else }}master-key-src{{ end }}
+              mountPath: {{ .Values.masterKey.mountPath }}
+              readOnly: true
+            {{- if and (eq .Values.redis.mode "external") .Values.redis.external.existingPasswordSecret }}
+            - name: redis-password
+              mountPath: /run/secrets/onetime-redis
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+
+        {{- if eq .Values.redis.mode "sidecar" }}
+        - name: redis
+          image: {{ include "onetime.redisImage" . }}
+          imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+          command:
+            {{- toYaml .Values.redis.command | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          # No containerPort is declared on purpose: the listener is bound to
+          # 127.0.0.1 and is reachable only from inside this pod's network
+          # namespace. Advertising a port that nothing can connect to only
+          # invites someone to "helpfully" expose it later.
+          livenessProbe:
+            exec:
+              command:
+                {{- toYaml .Values.redis.livenessProbeCommand | nindent 16 }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                {{- toYaml .Values.redis.livenessProbeCommand | nindent 16 }}
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.resources.redis | nindent 12 }}
+          volumeMounts:
+            - name: redis-config
+              mountPath: /etc/redis
+              readOnly: true
+            # Matches `dir /data/redis` in the rendered redis.conf.
+            - name: data
+              mountPath: /data/redis
+              subPath: redis
+        {{- end }}
+
+        {{- with .Values.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "onetime.pvcName" . }}
+          {{- else }}
+          # No persistence: every restart loses every stored secret and blob.
+          # Correct for CI, never for production.
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.tmpDir.sizeLimit }}
+        - name: master-key-src
+          secret:
+            secretName: {{ include "onetime.masterKeySecretName" . }}
+            # Kubelet still ORs group-read into this when fsGroup is set, which
+            # is exactly why the init container re-copies it. Asking for 0400
+            # here anyway keeps the intent visible and is what actually applies
+            # on clusters without fsGroup.
+            defaultMode: 0400
+            items:
+              - key: {{ include "onetime.masterKeySecretKey" . }}
+                path: {{ if .Values.masterKey.hardenPermissions }}{{ include "onetime.masterKeySecretKey" . }}{{ else }}{{ $keyFile }}{{ end }}
+        {{- if .Values.masterKey.hardenPermissions }}
+        - name: master-key
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        {{- end }}
+        {{- if eq .Values.redis.mode "sidecar" }}
+        - name: redis-config
+          configMap:
+            name: {{ include "onetime.fullname" . }}-redis
+            defaultMode: 0444
+        {{- end }}
+        {{- if and (eq .Values.redis.mode "external") .Values.redis.external.existingPasswordSecret }}
+        - name: redis-password
+          secret:
+            secretName: {{ .Values.redis.external.existingPasswordSecret }}
+            defaultMode: 0400
+            items:
+              - key: {{ .Values.redis.external.passwordKey }}
+                path: password
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

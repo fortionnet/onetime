@@ -1,0 +1,79 @@
+{{- include "onetime.validate" . -}}
+{{- if .Values.networkPolicy.enabled -}}
+{{/*
+Default-deny in both directions, with the narrowest possible holes.
+
+Egress is the interesting half. This application makes no outbound calls: no
+webhooks, no email, no object storage, no telemetry, no update checks. Redis is
+either a sidecar on loopback (which never leaves the pod and is not subject to
+NetworkPolicy at all) or an explicit endpoint you add under extraEgress.
+
+That means a deny-all egress policy costs exactly nothing operationally, and it
+removes the exfiltration path. If someone finds an RCE in a dependency, or a
+supply-chain attack lands a beacon in the image, the payload has nowhere to
+send the 20 GiB of secrets it can read off the volume.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "onetime.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "onetime.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "onetime.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # HTTP from the ingress controller.
+    - from:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.ingressControllerNamespaceSelector | nindent 12 }}
+      ports:
+        - port: http
+          protocol: TCP
+    # Metrics scrape. Separate rule so the ingress controller cannot reach
+    # 9090 and the monitoring stack cannot reach 8080.
+    - from:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.monitoringNamespaceSelector | nindent 12 }}
+      ports:
+        - port: metrics
+          protocol: TCP
+    # Same-namespace traffic, so `helm test` and kubectl port-forward debugging
+    # work without disabling the policy.
+    - from:
+        - podSelector: {}
+      ports:
+        - port: http
+          protocol: TCP
+    {{- with .Values.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  egress:
+    # DNS only. Everything else must be added explicitly.
+    - to:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.dnsNamespaceSelector | nindent 12 }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- if eq .Values.redis.mode "external" }}
+    # redis.mode=external: you MUST describe your Redis endpoint under
+    # networkPolicy.extraEgress. The chart cannot infer it from a URL - the
+    # host may be a Service, an ExternalName, or a raw IP outside the cluster,
+    # and each needs a different selector. Without it the app never becomes
+    # ready and /readyz reports Redis unreachable.
+    {{- if not .Values.networkPolicy.extraEgress }}
+    {{- fail "\n\nonetime: redis.mode=external with networkPolicy.enabled=true requires networkPolicy.extraEgress.\n\nThe default-deny egress rule blocks the app from reaching your Redis, so it would never\nbecome ready. Add the endpoint, for example:\n\n  networkPolicy:\n    extraEgress:\n      - to:\n          - namespaceSelector:\n              matchLabels:\n                kubernetes.io/metadata.name: redis\n        ports:\n          - port: 6379\n            protocol: TCP\n" }}
+    {{- end }}
+    {{- end }}
+    {{- with .Values.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

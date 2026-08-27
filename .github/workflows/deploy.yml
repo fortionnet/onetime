@@ -1,0 +1,180 @@
+name: Deploy
+
+# Optional. Delete this file if you deploy with ArgoCD instead — and if you do,
+# make sure masterKey.autoGenerate is false, because ArgoCD renders with
+# `helm template`, where `lookup` is empty and every sync would mint a new
+# master key and silently orphan every stored secret.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Chart version to deploy (e.g. 1.4.2). Defaults to the latest release tag."
+        required: false
+        type: string
+      dry_run:
+        description: "Render and diff only, do not apply."
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+# Never let two deploys race each other onto the same release. cancel-in-progress
+# is off on purpose: cancelling `helm upgrade` mid-flight leaves the release in
+# pending-upgrade, which blocks every subsequent deploy until someone runs
+# `helm rollback` by hand.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  HELM_VERSION: v3.18.4
+  RELEASE_NAME: onetime
+  NAMESPACE: onetime
+  CHART: oci://ghcr.io/fortionnet/charts/onetime
+
+jobs:
+  deploy:
+    name: Deploy to production
+    # Fortion's self-hosted Actions Runner Controller scale set, running inside
+    # the target cluster. That is what makes an in-cluster kubeconfig viable and
+    # keeps the API server off the public internet.
+    runs-on: arc-runner-set
+    environment:
+      name: production
+      url: https://onetime.fortion.cloud
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Resolve version
+        id: v
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "${VERSION}" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          VERSION="${VERSION#v}"
+          if [ -z "${VERSION}" ]; then
+            echo "::error::no version resolved; pass one via workflow_dispatch"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "deploying chart version ${VERSION}"
+
+      - name: Configure kubectl
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          if [ -n "${KUBE_CONFIG}" ]; then
+            mkdir -p "${HOME}/.kube"
+            printf '%s' "${KUBE_CONFIG}" | base64 -d > "${HOME}/.kube/config"
+            chmod 0600 "${HOME}/.kube/config"
+          else
+            # No secret: fall back to the runner pod's own ServiceAccount.
+            # That SA needs RBAC for Deployments, Services, Ingresses, PVCs,
+            # Secrets and ConfigMaps in the onetime namespace, and nothing else.
+            echo "using in-cluster credentials from the ARC runner ServiceAccount"
+          fi
+          kubectl version --output=yaml || true
+          kubectl get ns "${NAMESPACE}" || kubectl create ns "${NAMESPACE}"
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Diff (render only)
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          helm template "${RELEASE_NAME}" "${CHART}" \
+            --version "${VERSION}" \
+            --namespace "${NAMESPACE}" \
+            --values deploy/helm/onetime/values-production.yaml \
+            --set masterKey.existingSecret=onetime-master-key \
+            > /tmp/rendered.yaml
+          echo "rendered $(grep -c '^kind:' /tmp/rendered.yaml) objects"
+
+      - name: Verify the master key Secret already exists
+        run: |
+          # The chart would happily create its own Secret from masterKey.value,
+          # and a deploy that quietly swaps the keyring makes every stored
+          # secret undecryptable without a single error in the logs. Refuse to
+          # proceed unless the externally managed Secret is really there.
+          if ! kubectl -n "${NAMESPACE}" get secret onetime-master-key >/dev/null 2>&1; then
+            echo "::error::Secret onetime-master-key is missing in namespace ${NAMESPACE}."
+            echo "Create it before deploying:"
+            echo "  kubectl -n ${NAMESPACE} create secret generic onetime-master-key \\"
+            echo "    --from-literal=master.keys=\"v1:\$(head -c 32 /dev/urandom | base64)\""
+            exit 1
+          fi
+          echo "master key Secret present"
+
+      - name: helm upgrade --install
+        if: ${{ !inputs.dry_run }}
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          # --atomic rolls the release back automatically if it does not become
+          # healthy inside --timeout.
+          #
+          # Know what that costs here. With persistence enabled the chart uses
+          # `strategy: Recreate`, so a failed upgrade is: pod down, new pod up,
+          # new pod unhealthy, rollback tears it down again, old pod comes back.
+          # That is TWO outages instead of one, and the second one arrives while
+          # someone is already staring at the first.
+          #
+          # It is still the right default: an automatic rollback to a known-good
+          # release beats a half-applied one at 3am. But if you are debugging a
+          # deploy that keeps failing, drop --atomic and investigate the pod
+          # rather than letting Helm bounce it repeatedly.
+          helm upgrade --install "${RELEASE_NAME}" "${CHART}" \
+            --version "${VERSION}" \
+            --namespace "${NAMESPACE}" \
+            --create-namespace \
+            --values deploy/helm/onetime/values-production.yaml \
+            --set masterKey.existingSecret=onetime-master-key \
+            --atomic \
+            --timeout 5m \
+            --wait
+
+      - name: helm test
+        if: ${{ !inputs.dry_run }}
+        run: helm test "${RELEASE_NAME}" --namespace "${NAMESPACE}" --logs
+
+      - name: Summary
+        if: always()
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          {
+            echo "## Deploy"
+            echo
+            echo "- Release: \`${RELEASE_NAME}\` in \`${NAMESPACE}\`"
+            echo "- Chart version: \`${VERSION}\`"
+            echo "- Dry run: \`${{ inputs.dry_run }}\`"
+            echo
+            helm status "${RELEASE_NAME}" --namespace "${NAMESPACE}" 2>/dev/null | head -n 20 || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl -n "${NAMESPACE}" get all,pvc --sort-by=.metadata.creationTimestamp || true
+          kubectl -n "${NAMESPACE}" describe deploy "${RELEASE_NAME}" || true
+          kubectl -n "${NAMESPACE}" logs -l app.kubernetes.io/name=onetime --all-containers --tail=200 || true
+          echo "::notice::if the release is stuck in pending-upgrade, run: helm rollback ${RELEASE_NAME} -n ${NAMESPACE}"

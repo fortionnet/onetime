@@ -1,0 +1,46 @@
+# Compiled binary (`make build` writes ./onetime).
+/onetime
+/dist/
+/bin/
+
+# Go test and profiling output.
+*.test
+*.out
+*.prof
+coverage.out
+coverage.html
+coverage.txt
+
+# Secrets — never commit key material. The master keyring is 32-byte base64
+# material; a leaked copy decrypts every secret ever stored under it.
+.env
+.env.*
+!.env.example
+*.key
+*.keys
+*.pem
+*.p12
+*.pfx
+secrets/
+/run/
+
+# Local runtime data (docker-compose volumes, manual runs).
+/data/
+.data/
+/tmp-onetime/
+
+# Helm packaging output.
+*.tgz
+deploy/helm/**/charts/
+deploy/helm/**/Chart.lock
+
+# Tooling caches.
+.golangci-cache/
+node_modules/
+
+# Editor and OS noise.
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store

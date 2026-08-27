@@ -1,0 +1,33 @@
+# CI matrix 1: the production shape — persistence on, Redis sidecar, ingress on.
+#
+# This is the combination that must produce `strategy: Recreate`. If a change
+# ever makes it render RollingUpdate, the rollout deadlocks on a Multi-Attach
+# error in production and nowhere else.
+config:
+  baseURL: https://onetime.example.com
+  trustedProxies:
+    - 10.42.0.0/16
+
+masterKey:
+  # Well-known throwaway keyring, CI only.
+  value: "v1:Y2ktb25seS1rZXktZG8tbm90LXVzZS1hbnl3aGVyZQ=="
+
+redis:
+  mode: sidecar
+
+persistence:
+  enabled: true
+  size: 5Gi
+
+ingress:
+  enabled: true
+  host: onetime.example.com
+
+networkPolicy:
+  enabled: true
+
+serviceMonitor:
+  enabled: true
+
+prometheusRule:
+  enabled: true

@@ -1,0 +1,40 @@
+# CI matrix 2: external Redis.
+#
+# Exercises the branch where no sidecar is rendered, the app reads
+# ONETIME_REDIS_URL instead of ONETIME_REDIS_ADDR, and the default-deny egress
+# policy needs an explicit hole punched for the Redis endpoint.
+config:
+  baseURL: https://onetime.example.com
+
+masterKey:
+  value: "v1:Y2ktb25seS1rZXktZG8tbm90LXVzZS1hbnl3aGVyZQ=="
+
+redis:
+  mode: external
+  external:
+    url: redis://redis.data.svc.cluster.local:6379/0
+    db: 0
+    existingPasswordSecret: redis-auth
+    passwordKey: password
+
+persistence:
+  enabled: true
+  size: 5Gi
+
+ingress:
+  enabled: true
+  host: onetime.example.com
+
+networkPolicy:
+  enabled: true
+  # Required with mode=external. The chart fails the render without it, which
+  # is the point: default-deny egress would otherwise leave the app
+  # permanently not-ready with no obvious cause.
+  extraEgress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: data
+      ports:
+        - port: 6379
+          protocol: TCP

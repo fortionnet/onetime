@@ -1,0 +1,147 @@
+# Local development stack for onetime.
+#
+#   docker compose up --build      start
+#   docker compose down -v         stop and wipe the data volume
+#
+# Override the host ports when 8080 is taken. BASE_URL follows the HTTP port
+# automatically, because it is what generated links are built from — pointing it
+# at the wrong port produces links that resolve to nothing:
+#
+#   ONETIME_HTTP_PORT=8090 docker compose up -d
+#
+# This is NOT a production topology. Notably it passes the master keyring
+# through ONETIME_MASTER_KEYS (an environment variable) instead of a 0400 file.
+# Environment values leak through `docker inspect`, /proc/<pid>/environ and core
+# dumps; in Kubernetes the chart always uses a file. The key below is a public,
+# well-known dev value — anything encrypted with it is readable by anyone.
+
+name: onetime
+
+services:
+  # Docker creates a named volume owned by root, but the app runs as 65532 and
+  # cannot write into it. This mirrors what the Helm chart does with an init
+  # container: prepare the directories once, as root, then get out of the way.
+  init:
+    image: busybox:1.37.0-musl
+    command:
+      - sh
+      - -c
+      - "mkdir -p /data/blobs /data/tmp && chown -R 65532:65532 /data && chmod 700 /data/blobs /data/tmp"
+    volumes:
+      - app-data:/data
+    user: "0:0"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: dev
+        COMMIT: local
+        BUILD_DATE: "1970-01-01T00:00:00Z"
+    image: ghcr.io/fortionnet/onetime:dev
+    depends_on:
+      redis:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    ports:
+      - "${ONETIME_HTTP_PORT:-8080}:8080"      # HTTP
+      - "${ONETIME_METRICS_PORT:-9090}:9090"   # Prometheus metrics — in production this never sits behind the ingress
+    environment:
+      ONETIME_LISTEN_ADDR: ":8080"
+      ONETIME_METRICS_ADDR: ":9090"
+      ONETIME_BASE_URL: "http://localhost:${ONETIME_HTTP_PORT:-8080}"
+
+      ONETIME_REDIS_MODE: "external"
+      ONETIME_REDIS_URL: "redis://redis:6379/0"
+      ONETIME_REDIS_DB: "0"
+
+      # Dev-only keyring. Format is "<id>:<base64 of 32 raw bytes>", newest
+      # first; the first entry is the one used for new writes. Rotate by
+      # prepending a new id and keeping the old ones so existing secrets stay
+      # readable. Generate real ones with `make keygen`.
+      ONETIME_MASTER_KEYS: "v1:ZGV2LWRldi1kZXYtZGV2LWRldi1kZXYtZGV2LWRlMDE="
+
+      # Both must live on the same filesystem: a blob write is a temp file plus
+      # an atomic rename into place, and rename does not cross mount points.
+      ONETIME_DATA_DIR: "/data/blobs"
+      ONETIME_TMP_DIR: "/data/tmp"
+
+      ONETIME_MAX_FILE_BYTES: "52428800"
+      ONETIME_MAX_TEXT_INLINE_BYTES: "102400"
+      ONETIME_MAX_TEXT_BYTES: "1048576"
+
+      ONETIME_TTL_MIN_DAYS: "1"
+      ONETIME_TTL_MAX_DAYS: "30"
+      ONETIME_TTL_DEFAULT_DAYS: "14"
+
+      ONETIME_RECEIPT_EXTRA_TTL: "168h"
+      ONETIME_TOMBSTONE_TTL: "24h"
+      ONETIME_DOWNLOAD_TICKET_TTL: "5m"
+      ONETIME_DOWNLOAD_ATTEMPTS: "3"
+
+      # OWASP Argon2id floor. Lower it if local uploads feel sluggish, but never
+      # in a values file that reaches production.
+      ONETIME_ARGON2_MEM_KIB: "19456"
+      ONETIME_ARGON2_TIME: "2"
+      ONETIME_ARGON2_PAR: "1"
+      ONETIME_ARGON2_CONCURRENCY: "4"
+
+      ONETIME_PASSPHRASE_WINDOW_FAILS: "5"
+      ONETIME_PASSPHRASE_WINDOW: "20m"
+      ONETIME_PASSPHRASE_TOTAL_FAILS: "20"
+
+      ONETIME_DISK_HIGH_WATERMARK_PCT: "85"
+      ONETIME_DAILY_BYTES_PER_IP: "524288000"
+      ONETIME_TOTAL_STORAGE_BYTES: "21474836480"
+
+      ONETIME_GC_INTERVAL: "1m"
+      ONETIME_RECONCILE_INTERVAL: "6h"
+      ONETIME_ORPHAN_GRACE: "1h"
+
+      ONETIME_ENABLE_FILES: "true"
+      ONETIME_READ_ONLY: "false"
+      # Off for local development. The limits are tuned for a public deployment
+      # (30 creations an hour per address), which is enough to block you after a
+      # dozen clicks while you are clicking through the UI yourself.
+      ONETIME_RATELIMIT_ENABLED: "false"
+
+      ONETIME_DEFAULT_LANG: "cs"
+      ONETIME_LOG_LEVEL: "debug"
+      ONETIME_LOG_FORMAT: "text"
+
+      ONETIME_SHUTDOWN_TIMEOUT: "60s"
+      ONETIME_STRICT_STARTUP: "true"
+    volumes:
+      - app-data:/data
+    tmpfs:
+      # Mirrors the chart: transient plaintext lives in memory, never on disk.
+      - /tmp:mode=1777,size=64m
+    read_only: true
+    user: "65532:65532"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./deploy/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  app-data:
+  redis-data:

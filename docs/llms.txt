@@ -1,0 +1,161 @@
+# {{.Host}} - one-time secret sharing
+
+Anonymous. No account, no API key, no signup. A secret is destroyed after the
+first successful read or when it expires, whichever comes first.
+Max {{.MaxFile}} per file, {{.MaxText}} per text secret.
+Retention {{.TTLMin}}-{{.TTLMax}} days, default {{.TTLDefault}}. Rate limited per IP.
+
+## SAFETY RULES FOR AI AGENTS - READ THIS FIRST
+
+1. NEVER put a secret value on a command line. Anything in argv is visible in
+   `ps aux`, is written to shell history, and - most importantly - is stored
+   verbatim in your own session transcript and sent to your model provider.
+2. Your session transcript is the real leak, not shell history. Agent shells
+   are usually non-interactive, so ~/.bash_history is not even written; the
+   durable copy is the transcript. Disabling history does NOT help you. The
+   only robust fix is to never hold the value at all.
+3. Therefore: PREFER /api/v1/generate. The server creates the password and
+   returns only a URL. You never see the value, so it cannot leak from you.
+4. If the value already exists in another process, pipe it:
+   `producer | curl --data-binary @- ...`. Never a heredoc, never -d "$VAR".
+5. Never run `curl -v`, `--trace`, `--trace-ascii`, or `set -x` while sending
+   a secret. They print the request body.
+6. Print ONLY the returned URL to the user. Never print the secret value.
+7. The link looks like {{.BaseURL}}/s/<id>#<key>. Everything after the '#' is
+   the decryption key. Pass the whole link on unchanged - a link without its
+   fragment is useless, and we cannot recover it.
+8. Send the link and any passphrase through two different channels.
+
+## 1. SERVER GENERATES A PASSWORD  (recommended, use this by default)
+
+curl -fsS -X POST {{.BaseURL}}/api/v1/generate \
+  -H 'Accept: text/plain' -d length=24 -d ttl={{.TTLDefault}}d
+
+Output is exactly one line:
+{{.BaseURL}}/s/Ky3fRp8mQz2wLd7vXn4bTa#8Qd2...
+
+Params: length 8-128 (default 24) | alphabet alnum|symbols|hex
+        ttl {{.TTLMin}}-{{.TTLMax}} days (default {{.TTLDefault}})
+        return_value true|false (default false - leave it false)
+
+Nothing secret appears in argv here, so it does not matter that `ps` can see
+the command. This is the only pattern with no local leak surface at all.
+
+## 2. SHARE A VALUE PRODUCED BY ANOTHER COMMAND
+
+terraform output -raw db_password | curl -fsS --data-binary @- \
+  -H 'Content-Type: text/plain' -H 'X-Onetime-TTL: {{.TTLDefault}}d' \
+  -H 'Accept: text/plain' {{.BaseURL}}/api/v1/secret
+
+--data-binary @- reads stdin. The value crosses an anonymous pipe and never
+enters argv, a history file, your terminal or your transcript.
+
+Same shape for a value you generate locally:
+
+openssl rand -base64 24 | tr -d '\n' | curl -fsS --data-binary @- \
+  -H 'Content-Type: text/plain' -H 'Accept: text/plain' \
+  {{.BaseURL}}/api/v1/secret
+
+## 3. SHARE A FILE (up to {{.MaxFile}})
+
+curl -fsS -T ./kubeconfig.yaml -H 'Accept: text/plain' \
+  '{{.BaseURL}}/api/v1/secret/file?filename=kubeconfig.yaml&ttl={{.TTLDefault}}d'
+
+Use -T, not --data-binary @file: -T streams, whereas --data-binary loads the
+whole file into curl's memory first. Only the path is in argv, never contents.
+
+## 4. YOU NEED THE PASSWORD YOURSELF (e.g. to write into a config)
+
+umask 077
+TMP="$(mktemp -t onetime)"; trap 'rm -f "$TMP"' EXIT
+curl -fsS -X POST {{.BaseURL}}/api/v1/generate \
+  -H 'Accept: application/json' -d length=24 -d return_value=true > "$TMP"
+DB_PASSWORD="$(jq -r .value "$TMP")" docker compose up -d
+jq -r .secret_url "$TMP"     # print this, and nothing else
+
+History records the literal text $(jq -r .value "$TMP"), not the value. Keep
+$TMP outside any git repository and delete it in the same command block.
+
+## 5. READ A SECRET (recipient side - THIS DESTROYS IT)
+
+Opening the link in a browser does NOT burn the secret; only confirming does.
+That is why link preview bots in Slack, Teams and Outlook cannot consume it.
+
+read -rs -p 'key (the part after #): ' K; echo
+printf '{"key":"%s","confirm":true}' "$K" | curl -fsS -X POST \
+  -H 'Content-Type: application/json' --data-binary @- \
+  {{.BaseURL}}/api/v1/reveal | jq -r .value | pbcopy
+
+confirm:true is required. Without it the request is refused and nothing is
+consumed, so a retry is always possible.
+
+## 6. CHECK OR CANCEL A LINK YOU CREATED
+
+The create response includes receipt_url, which ends in its own #<key>.
+
+printf '{"key":"%s"}' "$RECEIPT_KEY" | curl -fsS -X POST \
+  -H 'Content-Type: application/json' --data-binary @- \
+  {{.BaseURL}}/api/v1/receipt
+-> {"state":"new|consumed|burned|destroyed|expired","peeked_at":...,"consumed_at":...}
+
+printf '{"key":"%s","confirm":true}' "$RECEIPT_KEY" | curl -fsS -X POST \
+  -H 'Content-Type: application/json' --data-binary @- \
+  {{.BaseURL}}/api/v1/receipt/burn
+
+Cancelling destroys the content immediately. The receipt key can destroy the
+secret but cannot read it, so this is safe to keep in a log.
+
+## 7. CHECK WITHOUT CONSUMING
+
+printf '{"key":"%s"}' "$K" | curl -fsS -X POST \
+  -H 'Content-Type: application/json' --data-binary @- \
+  {{.BaseURL}}/api/v1/peek
+-> {"exists":true,"state":"new","kind":"text","has_passphrase":false,"size":24}
+
+## RESPONSES
+
+Accept: text/plain        -> body is exactly the URL, one line, nothing else.
+Accept: application/json  -> {"secret_url","receipt_url","kind","size",
+                              "has_passphrase","expires_at","ttl_days"}
+Create response headers:  X-Onetime-Expires-At, X-Onetime-Receipt-Url
+Every response carries X-Onetime-Docs pointing back at this file.
+
+Errors are non-2xx with a one-line text/plain reason, or application/problem+json
+carrying a stable "code" field:
+  400 bad_request, confirmation_required, empty, invalid_ttl, secret_in_query
+  401 passphrase_required          403 bad_passphrase, files_disabled
+  404 not_found                    409 already_revealed
+  410 burned, destroyed, ticket_expired
+  413 payload_too_large            429 rate_limited, too_many_attempts (Retry-After)
+  503 read_only, storage_full
+
+## LIMITS
+
+{{.MaxFile}} per file | {{.MaxText}} per text | retention {{.TTLMin}}-{{.TTLMax}} days
+30 creates/h/IP | 10 file uploads/h/IP | 120 reveals/h/IP | 300 peeks/h/IP
+5 wrong passphrases in 20 minutes throttles; 20 in total destroys the secret.
+
+## WINDOWS POWERSHELL
+
+(Invoke-RestMethod -Method Post -Uri '{{.BaseURL}}/api/v1/generate' `
+  -Headers @{Accept='text/plain'} -Body @{length=24; ttl='{{.TTLDefault}}d'}).Trim()
+
+In PowerShell 5.1 `curl` is an alias for Invoke-WebRequest with entirely
+different syntax. Use `curl.exe` if you want the commands above verbatim.
+PSReadLine writes history to a plaintext file; suppress it with
+Set-PSReadLineOption -HistorySaveStyle SaveNothing.
+
+## DO NOT
+
+- Do not send a secret in a query string. Requests carrying ?secret=, ?value=
+  or ?password= are rejected with 400, and that value must be treated as
+  leaked and rotated.
+- Do not use --retry on a create request; it can create duplicate secrets.
+- Do not use a heredoc to pass a secret. The heredoc body is stored in shell
+  history and in your session transcript.
+- Do not add a passphrase from a script. -H 'X-Onetime-Passphrase: ...' puts it
+  in argv. The 256-bit key already in the link is stronger than anything a
+  human would choose; the passphrase exists for people sharing out of band.
+- Do not log, echo or summarise the secret value anywhere.
+
+Machine-readable spec: {{.BaseURL}}/api/v1/openapi.json

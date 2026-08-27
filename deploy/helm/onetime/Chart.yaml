@@ -1,0 +1,38 @@
+apiVersion: v2
+name: onetime
+description: One-time secret and file sharing — single-use links, encrypted at rest, self-destructing.
+type: application
+
+# version   = the chart's own version, bumped on every chart change.
+# appVersion = the default application image tag.
+# The release workflow overwrites both from the git tag, so the value committed
+# here only matters for `helm install` straight from a checkout.
+version: 0.1.0
+appVersion: "0.1.0"
+
+kubeVersion: ">=1.25.0-0"
+
+home: https://onetime.fortion.cloud
+sources:
+  - https://github.com/fortionnet/onetime
+icon: https://onetime.fortion.cloud/static/icon.png
+
+keywords:
+  - secrets
+  - one-time
+  - sharing
+  - password
+  - security
+
+maintainers:
+  - name: Fortion
+    url: https://github.com/fortionnet
+
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/containsSecurityUpdates: "false"
+  artifacthub.io/images: |
+    - name: onetime
+      image: ghcr.io/fortionnet/onetime:0.1.0
+    - name: valkey
+      image: valkey/valkey:8-alpine

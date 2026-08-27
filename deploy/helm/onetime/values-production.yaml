@@ -1,0 +1,141 @@
+# Production overrides for onetime.fortion.cloud.
+#
+# Used by .github/workflows/deploy.yml. Excluded from the packaged chart via
+# .helmignore — it is deployment configuration for one specific environment,
+# not part of the reusable chart.
+#
+# NOTHING SECRET GOES IN THIS FILE. The master keyring lives in the
+# externally managed Secret `onetime-master-key`, which the deploy workflow
+# refuses to proceed without.
+#
+# Every value below was checked against the live cluster (RKE2 v1.34,
+# kubeconfig ~/.kube/config-fortion.prod) rather than assumed.
+
+config:
+  baseURL: https://onetime.fortion.cloud
+  logLevel: info
+  logFormat: json
+  defaultLang: cs
+  strictStartup: true
+
+  # Cluster pod CIDR (canal "Network": 10.42.0.0/16; each node carves a /24).
+  #
+  # This is what makes per-client limiting work at all. Without it every request
+  # is attributed to the ingress controller's own pod IP, so the daily upload
+  # quota and the passphrase throttle become one bucket shared by every user —
+  # the first person to upload a few files locks out the whole company.
+  #
+  # The ingress pods are not on hostNetwork (verified), so the peer address the
+  # app sees really is a pod IP and this range is the right one. It cannot be
+  # narrowed further: the controller is a DaemonSet and its pods land in all
+  # three node ranges (10.42.0.x / 10.42.1.x / 10.42.2.x) with dynamic IPs.
+  trustedProxies:
+    - 10.42.0.0/16
+
+  limits:
+    maxFileBytes: 52428800
+    totalStorageBytes: 21474836480   # 20 GiB, matches persistence.size
+
+  # Left at the built-in defaults for now. Raise these if Fortion staff start
+  # hitting them: the limiter counts per client address, and everyone behind
+  # one office NAT gateway shares a single address. See docs/RUNBOOK.md.
+  rateLimits: {}
+
+masterKey:
+  # Set again on the command line by the workflow; repeated here so that a
+  # manual `helm upgrade -f values-production.yaml` cannot accidentally fall
+  # back to a chart-generated key.
+  existingSecret: onetime-master-key
+  existingSecretKey: master.keys
+  autoGenerate: false
+  hardenPermissions: true
+
+redis:
+  mode: sidecar
+  maxmemory: 192mb
+
+persistence:
+  enabled: true
+  size: 20Gi
+  # Cluster default; Ceph RBD is block storage, so ReadWriteOnce is native.
+  storageClass: csi-rbd-sc
+  accessMode: ReadWriteOnce
+
+ingress:
+  enabled: true
+
+  # This cluster runs the NGINX Inc. controller (nginx.org/ingress-controller),
+  # NOT the community ingress-nginx. Two classes exist: "f5" is public-facing,
+  # "f5-internal" is not reachable from outside.
+  className: f5
+  host: onetime.fortion.cloud
+
+  tls:
+    enabled: true
+    # The house default: 13 of 16 existing ingresses use the DNS-01 issuer.
+    # Switch to letsencrypt-prod (HTTP-01) if the fortion.cloud zone is not
+    # managed by this cert-manager instance.
+    clusterIssuer: letsencrypt-prod-dns01
+
+  # The chart's built-in annotations are for the community controller and use
+  # the nginx.ingress.kubernetes.io/ prefix. This controller ignores that prefix
+  # entirely — silently, so a 50 MB upload would simply fail at NGINX's 1 MB
+  # default with no hint as to why. Replacing the whole block is the point of
+  # overrideAnnotations.
+  #
+  # Shape copied from tori/tori-api, which already solves the same problem here.
+  overrideAnnotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod-dns01
+
+    # Must exceed ONETIME_MAX_FILE_BYTES plus multipart framing.
+    nginx.org/client-max-body-size: 52m
+
+    # A security control, not a performance tweak. With request buffering on
+    # (the NGINX default) the controller spools the whole body to disk on the
+    # ingress pod before forwarding it — up to 50 MB of user plaintext on a
+    # host this app does not control, does not encrypt and never cleans up.
+    nginx.org/location-snippets: |
+      proxy_request_buffering off;
+
+    # A 50 MB transfer to a phone is legitimately slow; the 60s default would
+    # cut it off mid-file.
+    nginx.org/proxy-read-timeout: 300s
+    nginx.org/proxy-send-timeout: 300s
+    nginx.org/redirect-to-https: "True"
+
+  # Response security headers are deliberately NOT set here. The app emits them
+  # itself (internal/httpx/security.go), which keeps them correct per route and
+  # avoids depending on the headers-more module being compiled into this
+  # controller image.
+
+networkPolicy:
+  enabled: true
+  # The controller lives in `nginx-ingress` on this cluster, not `ingress-nginx`
+  # as the chart default assumes. Getting this wrong does not fail loudly — it
+  # blocks all inbound traffic and the service is simply unreachable.
+  ingressControllerNamespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: nginx-ingress
+  # Prometheus and Grafana live in `mon`.
+  monitoringNamespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: mon
+
+serviceMonitor:
+  enabled: true
+prometheusRule:
+  enabled: true
+  additionalRuleLabels: {}
+
+resources:
+  app:
+    requests:
+      cpu: 200m
+      memory: 384Mi
+    limits:
+      memory: 768Mi
+
+# Off deliberately: at one replica a PDB is either a permanent drain block or a
+# no-op. See deploy/helm/onetime/README.md.
+podDisruptionBudget:
+  enabled: false

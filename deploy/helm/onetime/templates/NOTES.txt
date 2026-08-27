@@ -1,0 +1,126 @@
+
+  onetime {{ .Chart.AppVersion }} — release {{ .Release.Name }} in namespace {{ .Release.Namespace }}
+
+  URL:        {{ .Values.config.baseURL }}
+  Replicas:   {{ .Values.replicaCount }} (fixed — see values.yaml)
+  Strategy:   {{ if .Values.persistence.enabled }}Recreate (ReadWriteOnce volume){{ else }}RollingUpdate (no persistence){{ end }}
+  Redis:      {{ .Values.redis.mode }}
+  Storage:    {{ if .Values.persistence.enabled }}{{ if .Values.persistence.existingClaim }}existing claim {{ .Values.persistence.existingClaim }}{{ else }}PVC {{ include "onetime.pvcName" . }} ({{ .Values.persistence.size }}){{ end }}{{ else }}emptyDir — DATA IS LOST ON EVERY RESTART{{ end }}
+  Keyring:    {{ if .Values.masterKey.existingSecret }}existing Secret {{ .Values.masterKey.existingSecret }}{{ else if .Values.masterKey.value }}chart-managed from masterKey.value{{ else }}AUTO-GENERATED{{ end }}
+
+  Watch it come up:
+
+    kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "onetime.fullname" . }} --timeout=5m
+    helm test {{ .Release.Name }} -n {{ .Release.Namespace }} --logs
+
+{{- if not .Values.ingress.enabled }}
+
+  No Ingress. Reach it locally with:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "onetime.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}
+
+{{- if .Values.masterKey.autoGenerate }}
+
+  ############################################################################
+  ##                                                                        ##
+  ##   WARNING — masterKey.autoGenerate IS ENABLED                          ##
+  ##                                                                        ##
+  ############################################################################
+
+  Read this before you deploy it a second time.
+
+  The generated keyring is preserved across upgrades with a `lookup` against
+  the live cluster. `lookup` returns NOTHING in three situations:
+
+      * helm template
+      * helm install/upgrade --dry-run
+      * ArgoCD, Flux, and every other GitOps controller — they all render
+        manifests with `helm template` and then apply the result
+
+  In any of those, the chart does not find the existing Secret, so it generates
+  a BRAND NEW KEYRING and the apply replaces the old one.
+
+  What that looks like in practice: the sync goes green. The pods restart
+  cleanly. Metrics look normal. Nothing logs an error. And every secret stored
+  before that sync is now permanently undecryptable — you find out hours later,
+  when a user reports that their link says the key is unknown. There is no
+  recovery: the old key material was overwritten by the apply.
+
+  If this release is managed by ArgoCD or any `helm template` pipeline, stop
+  now and switch to an externally managed Secret:
+
+      kubectl -n {{ .Release.Namespace }} create secret generic onetime-master-key \
+        --from-literal=master.keys="v1:$(head -c 32 /dev/urandom | base64)"
+
+      # then: --set masterKey.existingSecret=onetime-master-key
+      #       --set masterKey.autoGenerate=false
+
+  Back up the current value RIGHT NOW, before anything overwrites it:
+
+      kubectl -n {{ .Release.Namespace }} get secret {{ include "onetime.masterKeySecretName" . }} \
+        -o jsonpath='{.data.{{ include "onetime.masterKeySecretKey" . }}}' | base64 -d
+
+  ############################################################################
+{{- end }}
+
+{{- if .Values.masterKey.value }}
+
+  NOTE: masterKey.value puts the keyring in your values file AND in Helm's own
+  release Secret, both in plaintext, and it will sit in `helm get values`
+  output and in your shell history. Fine for dev, CI and `helm test`. For
+  production use masterKey.existingSecret with SealedSecrets, External Secrets,
+  SOPS or a vault injector.
+{{- end }}
+
+{{- if not .Values.persistence.enabled }}
+
+  NOTE: persistence is disabled. Secrets and blobs live in an emptyDir and are
+  destroyed on every pod restart, node drain and upgrade. The deployment
+  strategy is RollingUpdate because there is no volume to contend over.
+{{- end }}
+
+{{- if and .Values.persistence.enabled (not .Values.config.trustedProxies) }}
+
+  NOTE: config.trustedProxies is empty. Every request will be attributed to the
+  ingress controller's pod IP, so the per-IP daily quota
+  (ONETIME_DAILY_BYTES_PER_IP) and the per-IP passphrase throttle are shared by
+  all of your users at once. Set it to your ingress controller's pod CIDR.
+{{- end }}
+
+{{- if and .Values.ingress.enabled (not .Values.ingress.overrideAnnotations) }}
+
+  NOTE: the Ingress uses `configuration-snippet`. ingress-nginx 1.9+ rejects
+  that annotation unless the controller was started with
+  `--enable-annotation-validation=false` or `allow-snippet-annotations: true`
+  in its ConfigMap. Without it the Ingress is admitted but the security headers
+  (Referrer-Policy, X-Robots-Tag) are silently absent — and the one-time link
+  travels in the URL, so Referrer-Policy is doing real work here.
+{{- end }}
+
+{{- if .Values.podDisruptionBudget.enabled }}
+
+  NOTE: a PodDisruptionBudget at replicaCount 1 is either a permanent block on
+  `kubectl drain` (minAvailable: 1) or a no-op (maxUnavailable: 1). You have
+  {{ if hasKey .Values.podDisruptionBudget "minAvailable" }}minAvailable{{ else }}maxUnavailable{{ end }}.
+{{- end }}
+
+{{- if eq .Values.redis.mode "none" }}
+
+  NOTE: redis.mode=none. There is no metadata store, so /readyz will report
+  not-ready and no secret can be created or resolved. This mode only exists for
+  smoke-testing the HTTP surface.
+{{- end }}
+
+  Rotating the master key (never remove an id that still has live secrets):
+
+    NEW=$(head -c 32 /dev/urandom | base64)
+    OLD=$(kubectl -n {{ .Release.Namespace }} get secret {{ include "onetime.masterKeySecretName" . }} \
+      -o jsonpath='{.data.{{ include "onetime.masterKeySecretKey" . }}}' | base64 -d)
+    # prepend the new key; keep every old one so existing secrets stay readable
+    kubectl -n {{ .Release.Namespace }} create secret generic {{ include "onetime.masterKeySecretName" . }} \
+      --from-literal={{ include "onetime.masterKeySecretKey" . }}="v2:${NEW},${OLD}" \
+      --dry-run=client -o yaml | kubectl apply -f -
+
+  Then watch onetime_decrypt_failures_total{reason="unknown_key_id"}. Any
+  non-zero value means you dropped a key that still had live secrets.

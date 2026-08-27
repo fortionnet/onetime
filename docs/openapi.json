@@ -1,0 +1,279 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "onetime",
+    "version": "1",
+    "summary": "One-time secret sharing. Anonymous, no account, no API key.",
+    "description": "Every secret is addressed by a 32-byte key carried in the URL fragment, which browsers never transmit. The key is required to decrypt and is never stored, so a database dump alone reveals nothing. A secret is destroyed on the first confirmed read.\n\nSecrets must travel in the request body, never a query string. See /llms.txt for copy-paste examples."
+  },
+  "servers": [{ "url": "{baseUrl}", "variables": { "baseUrl": { "default": "https://onetime.fortion.cloud" } } }],
+  "paths": {
+    "/api/v1/secret": {
+      "post": {
+        "summary": "Create a text secret",
+        "description": "Send the value as a raw text/plain body (the shape `producer | curl --data-binary @-` produces) or as JSON.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "text/plain": { "schema": { "type": "string" } },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["secret"],
+                "properties": {
+                  "secret": { "type": "string" },
+                  "ttl_days": { "type": "integer", "minimum": 1, "maximum": 30, "default": 14 },
+                  "passphrase": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          { "name": "X-Onetime-TTL", "in": "header", "schema": { "type": "string", "example": "14d" } },
+          { "name": "X-Onetime-Passphrase", "in": "header", "schema": { "type": "string" },
+            "description": "Avoid from scripts: a header value is visible in argv." },
+          { "name": "Accept", "in": "header", "schema": { "type": "string", "enum": ["text/plain", "application/json"] },
+            "description": "text/plain returns the link alone, on one line." }
+        ],
+        "responses": {
+          "201": { "description": "Created", "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/Created" } },
+            "text/plain": { "schema": { "type": "string" } } } },
+          "400": { "$ref": "#/components/responses/Problem" },
+          "413": { "$ref": "#/components/responses/Problem" },
+          "429": { "$ref": "#/components/responses/Problem" },
+          "503": { "$ref": "#/components/responses/Problem" }
+        }
+      }
+    },
+    "/api/v1/secret/file": {
+      "put": {
+        "summary": "Upload a file as a raw stream",
+        "description": "The whole request body is the file. Use `curl -T`, which streams; --data-binary @file buffers the file in memory first.",
+        "parameters": [
+          { "name": "filename", "in": "query", "schema": { "type": "string" } },
+          { "name": "ttl", "in": "query", "schema": { "type": "string", "example": "14d" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Created" } } } },
+          "413": { "$ref": "#/components/responses/Problem" },
+          "507": { "$ref": "#/components/responses/Problem" }
+        }
+      },
+      "post": {
+        "summary": "Upload a file as a browser form",
+        "description": "multipart/form-data. The file part must be sent last so that ttl_days and passphrase are known before any bytes are written.",
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": {
+          "type": "object",
+          "properties": {
+            "ttl_days": { "type": "integer" },
+            "passphrase": { "type": "string" },
+            "file": { "type": "string", "format": "binary" }
+          } } } } },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Created" } } } },
+          "400": { "$ref": "#/components/responses/Problem" },
+          "413": { "$ref": "#/components/responses/Problem" }
+        }
+      }
+    },
+    "/api/v1/generate": {
+      "post": {
+        "summary": "Have the server invent a password and share it",
+        "description": "The recommended entry point for automation. With return_value false (the default) the password is never sent to the caller, so it cannot leak from the caller's logs, terminal or transcript.",
+        "requestBody": { "content": {
+          "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "length": { "type": "integer", "minimum": 8, "maximum": 128, "default": 24 },
+              "alphabet": { "type": "string", "enum": ["alnum", "symbols", "hex"], "default": "symbols" },
+              "ttl_days": { "type": "integer", "minimum": 1, "maximum": 30, "default": 14 },
+              "passphrase": { "type": "string" },
+              "return_value": { "type": "boolean", "default": false }
+            } } },
+          "application/x-www-form-urlencoded": { "schema": { "type": "object" } } } },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Created" } } } },
+          "400": { "$ref": "#/components/responses/Problem" }
+        }
+      }
+    },
+    "/api/v1/peek": {
+      "post": {
+        "summary": "Describe a secret without consuming it",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KeyRequest" } } } },
+        "responses": {
+          "200": { "description": "Found", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "exists": { "type": "boolean" },
+              "state": { "type": "string" },
+              "kind": { "type": "string", "enum": ["text", "file"] },
+              "has_passphrase": { "type": "boolean" },
+              "size": { "type": "integer" },
+              "expires_at": { "type": "string", "format": "date-time" }
+            } } } } },
+          "404": { "$ref": "#/components/responses/Problem" },
+          "410": { "$ref": "#/components/responses/Problem" }
+        }
+      }
+    },
+    "/api/v1/reveal": {
+      "post": {
+        "summary": "Read a secret and destroy it",
+        "description": "confirm must be true. Requests without it are refused without consuming anything, which is what stops link preview bots from destroying a secret before the recipient sees it. A wrong passphrase also does not consume.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "allOf": [{ "$ref": "#/components/schemas/KeyRequest" }, {
+            "type": "object", "required": ["confirm"],
+            "properties": { "confirm": { "type": "boolean", "const": true } } }] } } } },
+        "responses": {
+          "200": { "description": "Revealed", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "kind": { "type": "string", "enum": ["text", "file"] },
+              "value": { "type": "string", "description": "Text secrets only." },
+              "filename": { "type": "string" },
+              "size": { "type": "integer" },
+              "download_url": { "type": "string" },
+              "download_ticket": { "type": "string" },
+              "ticket_expires_in": { "type": "integer" },
+              "revealed_at": { "type": "string", "format": "date-time" }
+            } } } } },
+          "400": { "$ref": "#/components/responses/Problem" },
+          "401": { "$ref": "#/components/responses/Problem" },
+          "403": { "$ref": "#/components/responses/Problem" },
+          "404": { "$ref": "#/components/responses/Problem" },
+          "409": { "$ref": "#/components/responses/Problem" },
+          "410": { "$ref": "#/components/responses/Problem" },
+          "429": { "$ref": "#/components/responses/Problem" }
+        }
+      }
+    },
+    "/api/v1/download": {
+      "get": {
+        "summary": "Stream a revealed file",
+        "description": "Authorised by the ticket returned from /reveal. Always served as application/octet-stream, never the uploader's declared type.",
+        "parameters": [{ "name": "X-Onetime-Ticket", "in": "header", "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "File", "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } },
+          "410": { "$ref": "#/components/responses/Problem" }
+        }
+      }
+    },
+    "/api/v1/receipt": {
+      "post": {
+        "summary": "See what happened to a secret you created",
+        "description": "Addressed by the receipt key, which can invalidate the secret but cannot decrypt it.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KeyRequest" } } } },
+        "responses": {
+          "200": { "description": "Status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Receipt" } } } },
+          "404": { "$ref": "#/components/responses/Problem" }
+        }
+      }
+    },
+    "/api/v1/receipt/burn": {
+      "post": {
+        "summary": "Destroy a secret you created",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "allOf": [{ "$ref": "#/components/schemas/KeyRequest" }, {
+            "type": "object", "required": ["confirm"],
+            "properties": { "confirm": { "type": "boolean", "const": true } } }] } } } },
+        "responses": {
+          "200": { "description": "Destroyed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Receipt" } } } },
+          "400": { "$ref": "#/components/responses/Problem" },
+          "404": { "$ref": "#/components/responses/Problem" }
+        }
+      }
+    },
+    "/api/v1/config": {
+      "get": {
+        "summary": "Live limits enforced by this instance",
+        "responses": { "200": { "description": "Limits", "content": { "application/json": { "schema": {
+          "type": "object",
+          "properties": {
+            "max_file_bytes": { "type": "integer" },
+            "max_text_bytes": { "type": "integer" },
+            "ttl_min_days": { "type": "integer" },
+            "ttl_max_days": { "type": "integer" },
+            "ttl_default_days": { "type": "integer" },
+            "files_enabled": { "type": "boolean" },
+            "read_only": { "type": "boolean" }
+          } } } } } }
+      }
+    },
+    "/healthz": { "get": { "summary": "Liveness. Never checks dependencies.", "responses": { "200": { "description": "Alive" } } } },
+    "/readyz": { "get": { "summary": "Readiness, including Redis and the volume.", "responses": { "200": { "description": "Ready" }, "503": { "description": "Degraded" } } } }
+  },
+  "components": {
+    "schemas": {
+      "KeyRequest": {
+        "type": "object",
+        "required": ["key"],
+        "properties": {
+          "key": { "type": "string", "description": "The URL fragment: everything after the # in the link." },
+          "passphrase": { "type": "string" }
+        }
+      },
+      "Created": {
+        "type": "object",
+        "properties": {
+          "secret_url": { "type": "string", "description": "Give this to the recipient. The fragment is the decryption key and is not recoverable." },
+          "receipt_url": { "type": "string", "description": "Keep this. It shows whether the secret was read and can destroy it." },
+          "kind": { "type": "string", "enum": ["text", "file"] },
+          "filename": { "type": "string" },
+          "size": { "type": "integer" },
+          "has_passphrase": { "type": "boolean" },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "receipt_expires_at": { "type": "string", "format": "date-time" },
+          "ttl_days": { "type": "integer" },
+          "value": { "type": ["string", "null"], "description": "Only from /generate with return_value true." }
+        }
+      },
+      "Receipt": {
+        "type": "object",
+        "properties": {
+          "state": { "type": "string", "enum": ["new", "consumed", "burned", "destroyed", "expired"] },
+          "kind": { "type": "string" },
+          "size": { "type": "integer" },
+          "has_passphrase": { "type": "boolean" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "secret_expires_at": { "type": "string", "format": "date-time" },
+          "peeked_at": { "type": "string", "format": "date-time", "description": "First time the link was opened without revealing." },
+          "consumed_at": { "type": "string", "format": "date-time" },
+          "passphrase_failures": { "type": "integer" },
+          "receipt_expires_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "description": "RFC 9457. The code field is stable and is the thing to branch on.",
+        "properties": {
+          "type": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "type": "integer" },
+          "code": { "type": "string", "enum": [
+            "not_found", "already_revealed", "burned", "destroyed",
+            "passphrase_required", "bad_passphrase", "too_many_attempts",
+            "confirmation_required", "payload_too_large", "empty",
+            "storage_full", "files_disabled", "read_only", "quota_exceeded",
+            "ticket_expired", "invalid_ttl", "rate_limited", "secret_in_query",
+            "bad_request", "cross_origin_rejected", "internal"
+          ] },
+          "detail": { "type": "string" },
+          "example": { "type": "string", "description": "A working command, when one would resolve the error." }
+        }
+      }
+    },
+    "responses": {
+      "Problem": {
+        "description": "Error",
+        "content": {
+          "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } },
+          "text/plain": { "schema": { "type": "string" } }
+        }
+      }
+    }
+  }
+}
