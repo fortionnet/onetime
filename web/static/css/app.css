@@ -2064,8 +2064,18 @@ body.page-gate .main {
     padding-bottom: max(var(--sp-4), env(safe-area-inset-bottom));
   }
 
+  /* The summary is the only place the chosen retention is visible without
+     opening the panel, and "More options" does not say what is inside — so
+     on a narrow screen it wraps onto its own line rather than disappearing. */
+  .details__summary {
+    flex-wrap: wrap;
+    row-gap: var(--sp-1);
+  }
+
   .details__value {
-    display: none;
+    flex-basis: 100%;
+    margin-left: 0;
+    text-align: left;
   }
 
   .navy {

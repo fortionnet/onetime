@@ -63,4 +63,9 @@ var (
 
 	// ErrBadTTL means the requested retention was outside the allowed range.
 	ErrBadTTL = errors.New("secret: retention out of range")
+
+	// ErrBadAlphabet means the generator was asked for a character set it does
+	// not have. Without its own error this surfaced as a 500, so a caller who
+	// mistyped a parameter went looking for the fault on the server.
+	ErrBadAlphabet = errors.New("secret: unknown alphabet")
 )

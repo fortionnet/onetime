@@ -26,9 +26,13 @@ export function init() {
   const revealed = $('#gate-revealed');
   const statusBox = $('#gate-status');
 
+  const passWindowFails = Number(document.body.dataset.passFails) || 5;
+
   let key = readKey();
   let meta = null;
-  let attemptsLeft = 5;
+  // Filled in from /peek. Until then it is null and the counter stays hidden,
+  // rather than announcing a number this page invented.
+  let attemptsLeft = null;
   let busy = false;
 
   /**
@@ -76,6 +80,19 @@ export function init() {
     icon.innerHTML = '';
     const glyph = entry.querySelector('[data-icon] svg');
     if (glyph) icon.appendChild(glyph.cloneNode(true));
+
+    // Some dead ends carry advice worth more than the headline — after an
+    // unexpected read, that the password should be rotated.
+    const more = $('#gate-status-more');
+    const moreSummary = entry.querySelector('[data-more-summary]');
+    const moreBody = entry.querySelector('[data-more-body]');
+    if (more && moreSummary && moreBody) {
+      setText($('#gate-status-more-summary'), moreSummary.textContent);
+      setText($('#gate-status-more-body'), moreBody.textContent);
+      show(more);
+    } else if (more) {
+      hide(more);
+    }
 
     only(statusBox);
     alertNow(entry.querySelector('[data-title]').textContent);
@@ -136,6 +153,8 @@ export function init() {
     // Saying "password protected" up front means the extra step later is an
     // announced change of plan rather than a surprise.
     toggle($('#chip-pass'), Boolean(data.has_passphrase));
+
+    if (typeof data.attempts_left === 'number') attemptsLeft = data.attempts_left;
 
     const label = $('#gate-cta-label');
     setText(label, data.has_passphrase ? label.dataset.pass : label.dataset.plain);
@@ -204,9 +223,20 @@ export function init() {
 
   if (passInput) onSubmitShortcut(passInput, () => passForm.requestSubmit());
 
+  /**
+   * Only ever shown once the count means something: either the server said
+   * some attempts are already gone, or one has just been used here. Greeting
+   * someone with "five attempts left" before they have typed anything is a
+   * threat about a thing they have not done.
+   */
   function renderAttempts() {
+    const el = $('#pass-attempts');
+    if (attemptsLeft === null || attemptsLeft >= passWindowFails) {
+      setText(el, '');
+      return;
+    }
     setText(
-      $('#pass-attempts'),
+      el,
       attemptsLeft === 1
         ? t('js.gate.last_attempt')
         : t('js.gate.attempts_left', {
@@ -217,7 +247,7 @@ export function init() {
   }
 
   function onWrongPassphrase() {
-    attemptsLeft = Math.max(0, attemptsLeft - 1);
+    attemptsLeft = attemptsLeft === null ? passWindowFails - 1 : Math.max(0, attemptsLeft - 1);
     const message =
       t('js.gate.wrong') +
       ' ' +
@@ -274,9 +304,13 @@ export function init() {
     setText(out, data.value || '');
     show($('#reveal-text-wrap'));
 
+    // Same WebView, same broken clipboard — said before the button is pressed
+    // rather than after it silently does nothing.
+    toggle($('#inapp-hint-text'), isInAppBrowser());
+
     const btn = $('#copy-secret');
     const label = $('#copy-secret-label');
-    btn.onclick = () => copyWithFeedback(btn, label, data.value || '');
+    btn.onclick = () => copyWithFeedback(btn, label, data.value || '', $('#copy-fallback'));
 
     out.focus();
   }

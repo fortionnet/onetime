@@ -72,6 +72,9 @@ type peekResponse struct {
 	HasPassphrase bool   `json:"has_passphrase"`
 	Size          int64  `json:"size"`
 	ExpiresAt     string `json:"expires_at"`
+	// Omitted unless the link is protected, so an unprotected one does not
+	// carry a field that reads as "zero attempts left".
+	AttemptsLeft *int `json:"attempts_left,omitempty"`
 }
 
 // revealResponse is a consumed secret.

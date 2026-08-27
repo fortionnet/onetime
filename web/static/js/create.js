@@ -406,9 +406,12 @@ export function init() {
       return;
     }
 
+    const passphrase = passInput?.value || '';
+
     hide(form);
     show(result);
     resultUrl.value = data.secret_url;
+    renderPassphrase(passphrase);
 
     // The hero and the "how it works" strip belong to the empty page. Once the
     // link exists they are stale context around the one thing that matters, so
@@ -443,11 +446,25 @@ export function init() {
     setText(el, t('js.expires_on', { date: formatDate(data.expires_at) }));
   }
 
+  // The sender has to send this by a different route than the link, so it has
+  // to survive the switch to the result view. It is already on their screen —
+  // repeating it here reveals nothing that was not visible a moment ago.
+  function renderPassphrase(value) {
+    const wrap = $('#result-pass-wrap');
+    if (!wrap || !value) return;
+    $('#result-pass').value = value;
+    show(wrap);
+
+    const btn = $('#copy-pass');
+    const label = $('#copy-pass-label');
+    btn.onclick = () => copyWithFeedback(btn, label, value, $('#copy-fallback'));
+  }
+
   function wireResultActions(data) {
     const copyBtn = $('#copy-link');
     const copyLabel = $('#copy-link-label');
     copyBtn.onclick = async () => {
-      const ok = await copyWithFeedback(copyBtn, copyLabel, data.secret_url);
+      const ok = await copyWithFeedback(copyBtn, copyLabel, data.secret_url, $('#copy-fallback'));
       if (ok) copied = true;
     };
   }

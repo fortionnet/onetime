@@ -242,6 +242,8 @@ var cs = map[string]string{
 	"create.result.title":         "Odkaz je připravený",
 	"create.result.label":         "Jednorázový odkaz",
 	"create.result.copy":          "Kopírovat odkaz",
+	"create.result.pass.label":    "Heslo navíc – pošlete zvlášť",
+	"create.result.pass.hint":     "Pošlete ho jinou cestou než odkaz. Znovu vám ho neukážeme.",
 	"create.result.warn":          "Zkopírujte si odkaz teď. Znovu ho nezobrazíme – u sebe ho celý uložený nemáme.",
 
 	// -- gate --------------------------------------------------------------
@@ -271,6 +273,7 @@ var cs = map[string]string{
 	"gate.file.download":     "Stáhnout soubor",
 	"gate.file.downloaded":   "Staženo",
 	"gate.file.inapp":        "V téhle aplikaci stahování často nefunguje. Když se soubor nestáhne, zkuste tlačítko znovu – stránku ale nezavírejte, soubor jinde není.",
+	"gate.text.inapp":        "Jste v prohlížeči uvnitř aplikace – kopírování v něm často nefunguje. Když tlačítko nezabere, označte text prstem a zkopírujte ho ručně. Stránku nezavírejte, obsah jinde není.",
 	"gate.noscript":          "Bez JavaScriptu obsah nezobrazíme. Zapněte ho a načtěte stránku znovu.",
 
 	// -- receipt -----------------------------------------------------------
@@ -424,6 +427,7 @@ var cs = map[string]string{
 	"js.locale":                    "cs-CZ",
 	"js.copy":                      "Kopírovat",
 	"js.copied":                    "Zkopírováno",
+	"js.copy_failed_label":         "Nešlo zkopírovat",
 	"js.copy_failed":               "Zkopírovat se nepodařilo. Označte text a zkopírujte ho ručně.",
 	"js.creating":                  "Vytvářím…",
 	"js.uploading":                 "Nahrávám",
@@ -556,6 +560,8 @@ var en = map[string]string{
 	"create.result.title":         "Your link is ready",
 	"create.result.label":         "One-time link",
 	"create.result.copy":          "Copy link",
+	"create.result.pass.label":    "Extra password — send it separately",
+	"create.result.pass.hint":     "Send it by a different route than the link. We will not show it to you again.",
 	"create.result.warn":          "Copy the link now. We will not show it again — we do not hold the whole of it.",
 
 	// -- gate --------------------------------------------------------------
@@ -585,6 +591,7 @@ var en = map[string]string{
 	"gate.file.download":     "Download the file",
 	"gate.file.downloaded":   "Downloaded",
 	"gate.file.inapp":        "Downloads often fail inside this app. If the file does not arrive, press the button again — but do not close the page, the file is nowhere else.",
+	"gate.text.inapp":        "You are in a browser inside an app, where copying often fails. If the button does nothing, select the text by hand and copy it. Do not close the page — the content is nowhere else.",
 	"gate.noscript":          "We cannot show the content without JavaScript. Switch it on and reload the page.",
 
 	// -- receipt -----------------------------------------------------------
@@ -735,6 +742,7 @@ var en = map[string]string{
 	"js.locale":                    "en-GB",
 	"js.copy":                      "Copy",
 	"js.copied":                    "Copied",
+	"js.copy_failed_label":         "Copy failed",
 	"js.copy_failed":               "Copying failed. Select the text and copy it by hand.",
 	"js.creating":                  "Creating…",
 	"js.uploading":                 "Uploading",

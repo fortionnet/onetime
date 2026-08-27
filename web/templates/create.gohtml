@@ -212,6 +212,23 @@
         </button>
         <p class="hint" id="result-expiry"></p>
       </div>
+      <p class="hint is-hidden" id="copy-fallback" role="alert"></p>
+
+      {{- /* Only shown when a passphrase was set. The generator puts a value
+             into a field that the result view then hides, so without this the
+             one thing the sender has to pass along by another route is gone
+             the moment they submit. */}}
+      <div class="field mt-5 is-hidden" id="result-pass-wrap">
+        <label class="label-mono" for="result-pass">{{call .T "create.result.pass.label"}}</label>
+        <div class="input-group">
+          <input type="text" class="input input--mono" id="result-pass" readonly
+                 spellcheck="false" value="">
+          <button type="button" class="btn btn--ghost btn--small" id="copy-pass">
+            <span id="copy-pass-label">{{call .T "js.copy"}}</span>
+          </button>
+        </div>
+        <p class="hint">{{call .T "create.result.pass.hint"}}</p>
+      </div>
 
       <div class="callout callout--warning mt-5">
         {{template "icon-warning" "callout__icon"}}

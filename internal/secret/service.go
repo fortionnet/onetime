@@ -212,6 +212,13 @@ type Info struct {
 	HasPassphrase bool
 	Size          int64
 	ExpiresAt     time.Time
+
+	// AttemptsLeft is how many passphrase attempts remain in the current
+	// window. It is only meaningful when HasPassphrase is set, and the browser
+	// needs it from here rather than assuming the configured maximum: a
+	// recipient who reloads after three wrong tries would otherwise be told
+	// they still have all five.
+	AttemptsLeft int
 }
 
 // Peek reports a secret's state without consuming it.
@@ -231,13 +238,25 @@ func (s *Service) Peek(ctx context.Context, keyStr string) (*Info, error) {
 		}
 	}
 	_ = key // the key is validated by load; nothing here needs to decrypt
-	return &Info{
+
+	info := &Info{
 		Kind:          sec.Kind,
 		State:         sec.State,
 		HasPassphrase: sec.HasPass,
 		Size:          sec.PlainSize,
 		ExpiresAt:     sec.Expires,
-	}, nil
+	}
+	if sec.HasPass {
+		info.AttemptsLeft = s.cfg.PassphraseWindowFails
+		if fails, err := s.store.PassFailCount(ctx, key.SecretID()); err == nil {
+			info.AttemptsLeft = max(0, s.cfg.PassphraseWindowFails-fails)
+		} else {
+			// A missing counter is not worth failing the page load over; the
+			// recipient just sees the optimistic number they saw before.
+			s.log.Warn("could not read the passphrase failure count", "error", err)
+		}
+	}
+	return info, nil
 }
 
 // Revealed is a consumed secret. Exactly one of Text or the file fields is set.

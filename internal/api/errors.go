@@ -68,6 +68,10 @@ func problemFor(err error) httpx.Problem {
 		return httpx.Problem{Status: http.StatusBadRequest, Code: httpx.CodeEmpty,
 			Title: "Nothing to share", Detail: "The request body was empty."}
 
+	case errors.Is(err, secret.ErrBadAlphabet):
+		return httpx.Problem{Status: http.StatusBadRequest, Code: httpx.CodeBadRequest,
+			Title: "Unknown alphabet", Detail: "alphabet must be alnum, symbols or hex."}
+
 	case errors.Is(err, secret.ErrBadTTL):
 		return httpx.Problem{Status: http.StatusBadRequest, Code: httpx.CodeInvalidTTL,
 			Title: "Retention out of range", Detail: "ttl_days must be between 1 and 30."}

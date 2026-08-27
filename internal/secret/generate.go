@@ -95,7 +95,7 @@ func alphabetFor(name string) (string, error) {
 	case "hex":
 		return alphabetHex, nil
 	default:
-		return "", fmt.Errorf("secret: unknown alphabet %q, want alnum, symbols or hex", name)
+		return "", fmt.Errorf("%w %q, want alnum, symbols or hex", ErrBadAlphabet, name)
 	}
 }
 
