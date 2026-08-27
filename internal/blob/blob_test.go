@@ -97,7 +97,7 @@ func TestFailedWriteLeavesNothingBehind(t *testing.T) {
 	if !errors.Is(err, boom) {
 		t.Fatalf("Create error = %v, want the writer's error", err)
 	}
-	if _, err := s.Open(id); !errors.Is(err, ErrNotFound) {
+	if _, openErr := s.Open(id); !errors.Is(openErr, ErrNotFound) {
 		t.Fatal("a failed write left a blob behind")
 	}
 	entries, err := os.ReadDir(s.tmp)

@@ -111,7 +111,9 @@ func runServe(ctx context.Context) error {
 	// cutting a download at 49 of 50 MB destroys a secret nobody received.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
 	defer cancel()
-	_ = metricsSrv.Shutdown(shutdownCtx)
+	if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
+		a.log.Warn("metrics server shutdown did not complete cleanly", "error", err)
+	}
 	if err := appSrv.Shutdown(shutdownCtx); err != nil {
 		a.log.Warn("shutdown did not complete cleanly", "error", err)
 	}
@@ -127,8 +129,8 @@ func setup(ctx context.Context) (*app, error) {
 	}
 	log := observability.NewLogger(os.Stdout, cfg.LogLevel, cfg.LogFormat)
 
-	if err := cfg.Validate(); err != nil {
-		return nil, err
+	if validateErr := cfg.Validate(); validateErr != nil {
+		return nil, validateErr
 	}
 
 	keys, err := cfg.MasterKeys()
@@ -145,9 +147,9 @@ func setup(ctx context.Context) (*app, error) {
 
 	password := ""
 	if cfg.RedisPasswordFile != "" {
-		raw, err := os.ReadFile(cfg.RedisPasswordFile)
-		if err != nil {
-			return nil, fmt.Errorf("read redis password: %w", err)
+		raw, readErr := os.ReadFile(cfg.RedisPasswordFile)
+		if readErr != nil {
+			return nil, fmt.Errorf("read redis password: %w", readErr)
 		}
 		password = strings.TrimSpace(string(raw))
 	}
@@ -161,20 +163,20 @@ func setup(ctx context.Context) (*app, error) {
 
 	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := st.Ping(pingCtx); err != nil {
-		return nil, fmt.Errorf("redis is unreachable at startup: %w", err)
+	if pingErr := st.Ping(pingCtx); pingErr != nil {
+		return nil, fmt.Errorf("redis is unreachable at startup: %w", pingErr)
 	}
-	if err := st.CheckEvictionPolicy(pingCtx); err != nil {
+	if policyErr := st.CheckEvictionPolicy(pingCtx); policyErr != nil {
 		if cfg.StrictStartup {
-			return nil, err
+			return nil, policyErr
 		}
-		log.Error("redis eviction policy check failed", "error", err)
+		log.Error("redis eviction policy check failed", "error", policyErr)
 	}
 	// A master key that changed without the old one still in the ring means
 	// every live secret just became permanently unreadable. That is worth
 	// saying loudly at startup rather than discovering from a support ticket.
-	if prev, mismatch, err := st.CheckActiveKeyID(pingCtx, ring.ActiveID(), ring.IDs()); err != nil {
-		log.Warn("could not verify the master key id", "error", err)
+	if prev, mismatch, keyErr := st.CheckActiveKeyID(pingCtx, ring.ActiveID(), ring.IDs()); keyErr != nil {
+		log.Warn("could not verify the master key id", "error", keyErr)
 	} else if mismatch {
 		log.Error("the previously active master key is missing from the keyring; "+
 			"every secret written under it is now unreadable",
@@ -191,7 +193,7 @@ func setup(ctx context.Context) (*app, error) {
 	metrics := observability.NewMetrics(reg)
 	metrics.SetBuildInfo(version, commit, runtime.Version())
 
-	svc := secret.New(cfg, st, blobs, deriver)
+	svc := secret.New(cfg, st, blobs, deriver, log)
 	svc.SetEvents(secret.Events{
 		Created: func(kind, source string, size int64) {
 			metrics.SecretsCreated.WithLabelValues(kind, source).Inc()

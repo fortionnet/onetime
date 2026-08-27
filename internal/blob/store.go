@@ -259,11 +259,16 @@ func (s *Store) Walk(fn func(Entry) error) error {
 		}
 		id := strings.TrimSuffix(d.Name(), blobExt)
 		if validID(id) != nil {
+			// Not one of ours: a stray file, an editor backup, debris from a
+			// half-finished upload. Skipping it is the whole point of the
+			// check, so this is not an error to propagate.
+			//nolint:nilerr // a foreign filename is skipped, not a walk failure
 			return nil
 		}
 		info, err := d.Info()
 		if err != nil {
-			return nil // vanished under us; the next pass will catch it
+			//nolint:nilerr // vanished under us; the next pass will catch it
+			return nil
 		}
 		entry := Entry{ID: id, Size: info.Size(), ModTime: info.ModTime()}
 		if meta, err := s.ReadSidecar(id); err == nil {
@@ -299,11 +304,16 @@ func validID(id string) error {
 // is not fatal: some filesystems refuse to open a directory for sync, and the
 // worst case is a blob the collector later treats as an orphan.
 func syncDir(dir string) {
+	// The path is a shard directory under the store's own root, built from an
+	// id that validID has already constrained to exactly 64 hex characters, so
+	// there is no component an attacker could steer.
+	//nolint:gosec // G304: dir is derived from s.dir plus a validID-checked id
 	d, err := os.Open(dir)
 	if err != nil {
 		return
 	}
 	defer func() { _ = d.Close() }()
+	//nolint:errcheck // best-effort, for the reason in this function's doc comment
 	_ = d.Sync()
 }
 

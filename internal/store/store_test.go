@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -67,7 +68,7 @@ func TestCreateAndLoadSecret(t *testing.T) {
 		t.Fatalf("ReceiptID = %q, want mid1", got.ReceiptID)
 	}
 
-	if _, err := s.LoadSecret(ctx, "nope"); err != ErrNotFound {
+	if _, err := s.LoadSecret(ctx, "nope"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("LoadSecret(missing) error = %v, want ErrNotFound", err)
 	}
 }
@@ -187,7 +188,7 @@ func TestExpiryRemovesSecretButKeepsReceipt(t *testing.T) {
 
 	mr.FastForward(15 * 24 * time.Hour)
 
-	if _, err := s.LoadSecret(ctx, "sid1"); err != ErrNotFound {
+	if _, err := s.LoadSecret(ctx, "sid1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expired secret error = %v, want ErrNotFound", err)
 	}
 	// The sender should still be able to see that nobody read it in time.
@@ -264,10 +265,10 @@ func TestTicketAttemptsAreBounded(t *testing.T) {
 		}
 	}
 	// Beyond that the ticket is destroyed rather than becoming a download URL.
-	if _, err := s.ClaimTicket(ctx, "tid1", 3); err != ErrTicketExhausted {
+	if _, err := s.ClaimTicket(ctx, "tid1", 3); !errors.Is(err, ErrTicketExhausted) {
 		t.Fatalf("error = %v, want ErrTicketExhausted", err)
 	}
-	if _, err := s.ClaimTicket(ctx, "tid1", 3); err != ErrNotFound {
+	if _, err := s.ClaimTicket(ctx, "tid1", 3); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("error after exhaustion = %v, want ErrNotFound", err)
 	}
 }

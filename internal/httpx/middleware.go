@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -42,15 +43,25 @@ func RequestID(next http.Handler) http.Handler {
 	})
 }
 
-// RequestIDFrom reads the correlation id back out.
+// RequestIDFrom reads the correlation id back out. It returns "" outside a
+// request, which is what callers want: a log line without a correlation id is
+// still worth emitting.
 func RequestIDFrom(ctx context.Context) string {
-	id, _ := ctx.Value(ctxRequestID).(string)
+	id, ok := ctx.Value(ctxRequestID).(string)
+	if !ok {
+		return ""
+	}
 	return id
 }
 
-// NonceFrom reads the per-response CSP nonce.
+// NonceFrom reads the per-response CSP nonce. An empty result means the
+// template renders no nonce attribute, so the script is blocked by the policy
+// rather than silently allowed.
 func NonceFrom(ctx context.Context) string {
-	n, _ := ctx.Value(ctxNonce).(string)
+	n, ok := ctx.Value(ctxNonce).(string)
+	if !ok {
+		return ""
+	}
 	return n
 }
 
@@ -65,7 +76,9 @@ func Recover(log *slog.Logger) Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if rec := recover(); rec != nil {
-					if rec == http.ErrAbortHandler {
+					// net/http uses this panic as a control signal to abandon a
+					// response, not as a failure; re-panic so the server sees it.
+					if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 						panic(rec)
 					}
 					log.Error("handler panicked",

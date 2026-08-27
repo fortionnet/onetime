@@ -128,12 +128,12 @@ func (s *Service) writeBlob(ctx context.Context, b *build, write func(io.Writer)
 		Expires:  b.secret.Expires.Unix(),
 	}
 	encSize, err := s.blobs.Create(id, meta, func(w io.Writer) error {
-		sw, err := crypto.NewStreamWriter(b.dek, w, b.payloadAAD())
-		if err != nil {
-			return err
+		sw, writerErr := crypto.NewStreamWriter(b.dek, w, b.payloadAAD())
+		if writerErr != nil {
+			return writerErr
 		}
-		if err := write(sw); err != nil {
-			return err
+		if writeErr := write(sw); writeErr != nil {
+			return writeErr
 		}
 		return sw.Close()
 	})

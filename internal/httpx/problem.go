@@ -86,13 +86,27 @@ func WriteProblem(w http.ResponseWriter, r *http.Request, p Problem) {
 		if p.Example != "" {
 			body += "\n" + p.Example + "\n"
 		}
-		_, _ = w.Write([]byte(body))
+		writeBody(w, []byte(body))
 		return
 	}
 
 	h.Set("Content-Type", "application/problem+json; charset=utf-8")
 	w.WriteHeader(p.Status)
-	_ = json.NewEncoder(w).Encode(p)
+	writeJSONBody(w, p)
+}
+
+// writeBody and writeJSONBody send a body whose response is already committed.
+//
+// By the time either runs, the status line and headers have gone out, so a
+// failure cannot be turned into a different response — there is no error page
+// left to send. The realistic cause is a client that hung up mid-transfer,
+// which the access log already records, so the error has nowhere useful to go.
+func writeBody(w http.ResponseWriter, body []byte) {
+	_, _ = w.Write(body) //nolint:errcheck // response already in flight; nothing actionable
+}
+
+func writeJSONBody(w http.ResponseWriter, v any) {
+	_ = json.NewEncoder(w).Encode(v) //nolint:errcheck // response already in flight; nothing actionable
 }
 
 // WriteRateLimited renders a throttling response with the retry hint clients
@@ -117,7 +131,7 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Onetime-Docs", DocsURL)
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	writeJSONBody(w, v)
 }
 
 // WritePlain renders a bare text response, used when a caller asked for
@@ -127,7 +141,7 @@ func WritePlain(w http.ResponseWriter, status int, body string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Onetime-Docs", DocsURL)
 	w.WriteHeader(status)
-	_, _ = w.Write([]byte(body + "\n"))
+	writeBody(w, []byte(body+"\n"))
 }
 
 // PrefersPlainText reports whether the caller wants a bare text response.

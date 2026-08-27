@@ -190,8 +190,8 @@ func (r *streamReader) next() error {
 		if len(peeked) < tagLen {
 			return ErrCorruptStream
 		}
-		if err := r.open(len(peeked), true); err != nil {
-			return err
+		if openErr := r.open(len(peeked), true); openErr != nil {
+			return openErr
 		}
 		r.done = true
 		if _, peekErr := r.src.Peek(1); peekErr == nil {

@@ -100,17 +100,17 @@ func (s *Server) handleCreateFileMultipart(w http.ResponseWriter, r *http.Reques
 		}
 
 		if part.FormName() != "file" {
-			value, err := io.ReadAll(io.LimitReader(part, maxFieldBytes))
+			value, readErr := io.ReadAll(io.LimitReader(part, maxFieldBytes))
 			_ = part.Close()
-			if err != nil {
+			if readErr != nil {
 				s.badRequest(w, r, "could not read form field "+part.FormName())
 				return
 			}
 			switch part.FormName() {
 			case "ttl_days", "ttl":
-				days, err := parseTTL(string(value))
-				if err != nil {
-					s.badRequest(w, r, err.Error())
+				days, ttlErr := parseTTL(string(value))
+				if ttlErr != nil {
+					s.badRequest(w, r, ttlErr.Error())
 					return
 				}
 				req.TTLDays = days

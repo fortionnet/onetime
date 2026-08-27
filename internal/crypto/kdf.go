@@ -98,9 +98,9 @@ func (d *Deriver) KEK(keyID string, k Key, pass Passphrase, salt []byte, params 
 	ikm := make([]byte, 0, KeyLen+32+MasterKeyLen)
 	ikm = append(ikm, k[:]...)
 	if !pass.Empty() {
-		stretched, err := d.argon2(pass, salt, master, params)
-		if err != nil {
-			return out, err
+		stretched, argonErr := d.argon2(pass, salt, master, params)
+		if argonErr != nil {
+			return out, argonErr
 		}
 		ikm = append(ikm, stretched...)
 		zero(stretched)

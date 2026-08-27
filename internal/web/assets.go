@@ -31,12 +31,19 @@ func newAssets(fsys fs.FS) *assets {
 		byPath: map[string]string{},
 		etag:   map[string]string{},
 	}
+	// Indexing is best-effort by design. The tree is compiled into the binary,
+	// so a failure here means the build is broken in a way no runtime handling
+	// can repair; an asset missing from the index simply falls back to being
+	// served unhashed, which costs caching, not correctness.
+	//nolint:errcheck // the callback never reports an error, so neither can the walk
 	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		//nolint:nilerr // an unreadable entry is skipped, not fatal: see above
 		if err != nil || d.IsDir() {
 			return nil
 		}
 		body, err := fs.ReadFile(fsys, p)
 		if err != nil {
+			//nolint:nilerr // one unreadable asset must not abandon the whole index
 			return nil
 		}
 		sum := sha256.Sum256(body)

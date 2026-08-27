@@ -2,6 +2,7 @@ package blob
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 )
@@ -216,9 +217,19 @@ func (c *Collector) drop(stats *Stats, e Entry, reason string) error {
 
 func (c *Collector) referenced(ctx context.Context, id string) (bool, error) {
 	meta, err := c.store.ReadSidecar(id)
-	if err != nil {
-		// No sidecar means nothing can own it.
+	if errors.Is(err, ErrNotFound) {
+		// No sidecar at all: the write was interrupted between the two renames,
+		// so no secret ever referenced this file.
+		//nolint:nilerr // a missing sidecar is an answer, not a failure
 		return false, nil
+	}
+	if err != nil {
+		// A sidecar that exists but cannot be read is a different situation: it
+		// says nothing about ownership, and treating that as "unowned" would
+		// delete a live blob because of a transient read error. Report it so the
+		// sweep skips this one; the reconcile pass reclaims it from the volume
+		// if it really is orphaned.
+		return false, err
 	}
 	return c.index.BlobReferenced(ctx, meta.SecretID, id)
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ type Service struct {
 	deriver *crypto.Deriver
 	now     func() time.Time
 	events  Events
+	log     *slog.Logger
 }
 
 // Events lets the caller observe outcomes for metrics without this package
@@ -37,8 +39,15 @@ type Events struct {
 }
 
 // New builds the service.
-func New(cfg *config.Config, st *store.Redis, blobs *blob.Store, deriver *crypto.Deriver) *Service {
-	return &Service{cfg: cfg, store: st, blobs: blobs, deriver: deriver, now: time.Now}
+//
+// The logger is used only for the best-effort cleanup paths, where an error
+// cannot change the answer given to the caller but still says something about
+// the health of the volume or of Redis. A nil logger discards those lines.
+func New(cfg *config.Config, st *store.Redis, blobs *blob.Store, deriver *crypto.Deriver, log *slog.Logger) *Service {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	return &Service{cfg: cfg, store: st, blobs: blobs, deriver: deriver, now: time.Now, log: log}
 }
 
 // SetClock overrides the clock, for tests.
@@ -173,14 +182,18 @@ func (s *Service) CreateFile(ctx context.Context, req CreateFileRequest, body io
 		return nil, err
 	}
 	if written == 0 {
-		_, _ = s.blobs.Delete(b.secret.Blob)
+		// Nothing was committed yet, so the disk counter never learned about
+		// this blob and must not be adjusted for it — only the file goes.
+		s.discardBlob(b.secret.Blob, "empty upload")
 		return nil, ErrEmpty
 	}
 	b.secret.PlainSize = written
 	b.receipt.PlainSize = written
 
 	if err := s.commit(ctx, b); err != nil {
-		_, _ = s.blobs.Delete(b.secret.Blob)
+		// commit charges the disk counter as its last step, so a failure here
+		// means the counter was never charged: delete the file and nothing else.
+		s.discardBlob(b.secret.Blob, "commit failed")
 		return nil, err
 	}
 	s.emitCreated(store.KindFile, req.Source, written)
@@ -214,10 +227,10 @@ func (s *Service) Peek(ctx context.Context, keyStr string) (*Info, error) {
 		if err := s.store.MarkPeeked(ctx, sec.ReceiptID, s.now()); err != nil {
 			// The sender losing a "delivered" timestamp is not worth failing
 			// the recipient's page load over.
-			_ = err
+			s.log.Warn("could not record the delivery timestamp on a receipt", "error", err)
 		}
 	}
-	_ = key
+	_ = key // the key is validated by load; nothing here needs to decrypt
 	return &Info{
 		Kind:          sec.Kind,
 		State:         sec.State,
@@ -260,9 +273,9 @@ func (s *Service) Reveal(ctx context.Context, req RevealRequest) (*Revealed, err
 		s.emitRevealed("", "not_found")
 		return nil, err
 	}
-	if err := stateError(sec.State); err != nil {
+	if stateErr := stateError(sec.State); stateErr != nil {
 		s.emitRevealed(sec.Kind, "already")
-		return nil, err
+		return nil, stateErr
 	}
 	if !req.Confirm {
 		return nil, ErrConfirmationRequired
@@ -273,9 +286,9 @@ func (s *Service) Reveal(ctx context.Context, req RevealRequest) (*Revealed, err
 
 	sid := key.SecretID()
 	if sec.HasPass {
-		fails, err := s.store.PassFailCount(ctx, sid)
-		if err != nil {
-			return nil, err
+		fails, countErr := s.store.PassFailCount(ctx, sid)
+		if countErr != nil {
+			return nil, countErr
 		}
 		if fails >= s.cfg.PassphraseWindowFails {
 			return nil, ErrTooManyAttempts
@@ -284,7 +297,7 @@ func (s *Service) Reveal(ctx context.Context, req RevealRequest) (*Revealed, err
 
 	params := s.deriver.Params()
 	if sec.KDFParams != "" {
-		if p, err := crypto.ParseKDFParams(sec.KDFParams); err == nil {
+		if p, parseErr := crypto.ParseKDFParams(sec.KDFParams); parseErr == nil {
 			params = p
 		}
 	}
@@ -323,10 +336,10 @@ func (s *Service) Reveal(ctx context.Context, req RevealRequest) (*Revealed, err
 	if claim.Kind == store.KindFile {
 		return s.fileReveal(ctx, sid, sec.KeyID, dek, claim)
 	}
-	return s.textReveal(sid, sec.KeyID, dek, claim)
+	return s.textReveal(ctx, sid, sec.KeyID, dek, claim)
 }
 
-func (s *Service) textReveal(sid, keyID string, dek crypto.DEK, claim *store.Claim) (*Revealed, error) {
+func (s *Service) textReveal(ctx context.Context, sid, keyID string, dek crypto.DEK, claim *store.Claim) (*Revealed, error) {
 	aad := crypto.AAD("payload", sid, keyID)
 	var sealed []byte
 	if len(claim.Payload) > 0 {
@@ -341,7 +354,7 @@ func (s *Service) textReveal(sid, keyID string, dek crypto.DEK, claim *store.Cla
 		if err != nil {
 			return nil, fmt.Errorf("secret: read payload: %w", err)
 		}
-		_, _ = s.blobs.Delete(claim.Blob)
+		s.releaseBlob(ctx, claim.Blob)
 	}
 	text, err := crypto.OpenBytes(dek, sealed, aad)
 	if err != nil {
@@ -440,7 +453,7 @@ func (s *Service) OpenDownload(ctx context.Context, ticketStr string) (*Download
 
 	name := ""
 	if len(rec.FilenameCT) > 0 {
-		if raw, err := crypto.OpenSmall(ticket.DEK, rec.FilenameCT, ticketAAD(tid)); err == nil {
+		if raw, openErr := crypto.OpenSmall(ticket.DEK, rec.FilenameCT, ticketAAD(tid)); openErr == nil {
 			name = string(raw)
 		}
 	}
@@ -460,11 +473,12 @@ func (s *Service) OpenDownload(ctx context.Context, ticketStr string) (*Download
 			}
 			// Only remove the file once a transfer actually finished, so a
 			// dropped connection can still be retried within the ticket's life.
-			if freed, err := s.blobs.Delete(rec.Blob); err == nil {
-				_ = s.store.AddDiskUsage(ctx, -freed)
-				_ = s.store.ForgetBlob(ctx, rec.Blob)
+			s.releaseBlob(ctx, rec.Blob)
+			if err := s.store.DeleteTicket(ctx, tid); err != nil {
+				// The ticket carries its own TTL, so at worst it lingers until
+				// that elapses; the blob it points at is already gone.
+				s.log.Warn("could not delete a spent download ticket", "error", err)
 			}
-			_ = s.store.DeleteTicket(ctx, tid)
 		},
 	}, nil
 }
@@ -519,10 +533,7 @@ func (s *Service) Burn(ctx context.Context, metaKey string) (*Status, error) {
 		}
 		if claim.Won {
 			if claim.Blob != "" {
-				if freed, err := s.blobs.Delete(claim.Blob); err == nil {
-					_ = s.store.AddDiskUsage(ctx, -freed)
-					_ = s.store.ForgetBlob(ctx, claim.Blob)
-				}
+				s.releaseBlob(ctx, claim.Blob)
 			}
 			if s.events.Burned != nil {
 				s.events.Burned("sender")
@@ -586,10 +597,7 @@ func (s *Service) recordPassphraseFailure(ctx context.Context, sid string, sec *
 		}
 		if claim.Won {
 			if claim.Blob != "" {
-				if freed, delErr := s.blobs.Delete(claim.Blob); delErr == nil {
-					_ = s.store.AddDiskUsage(ctx, -freed)
-					_ = s.store.ForgetBlob(ctx, claim.Blob)
-				}
+				s.releaseBlob(ctx, claim.Blob)
 			}
 			if s.events.Burned != nil {
 				s.events.Burned("bruteforce")
@@ -600,10 +608,58 @@ func (s *Service) recordPassphraseFailure(ctx context.Context, sid string, sec *
 	return ErrBadPassphrase
 }
 
+// releaseBlob deletes a blob whose secret is already gone, and reconciles the
+// two pieces of bookkeeping that referred to it: the disk usage counter and the
+// collection schedule.
+//
+// Every caller is past the point where an error could change the answer given
+// to the client, so this cannot fail the request, and the collector's reconcile
+// pass rebuilds the counter from the volume either way. It is still logged: a
+// counter that drifts upward unnoticed ends with the service refusing uploads
+// onto a volume that has plenty of room, and the reconcile pass runs hours
+// apart.
+func (s *Service) releaseBlob(ctx context.Context, blobID string) {
+	if blobID == "" {
+		return
+	}
+	freed, err := s.blobs.Delete(blobID)
+	if err != nil {
+		s.log.Warn("could not delete a spent blob; the collector will reclaim it",
+			"blob", blobID, "error", err)
+		return
+	}
+	if err := s.store.AddDiskUsage(ctx, -freed); err != nil {
+		s.log.Warn("could not credit freed bytes back to the disk counter; it will read high until the next reconcile",
+			"blob", blobID, "bytes", freed, "error", err)
+	}
+	if err := s.store.ForgetBlob(ctx, blobID); err != nil {
+		s.log.Warn("could not drop a deleted blob from the collection schedule",
+			"blob", blobID, "error", err)
+	}
+}
+
+// discardBlob removes a blob that was written but never committed. It is
+// deliberately narrower than releaseBlob: nothing has charged the disk counter
+// for this file yet, so crediting bytes back would push the counter negative.
+func (s *Service) discardBlob(blobID, reason string) {
+	if blobID == "" {
+		return
+	}
+	if _, err := s.blobs.Delete(blobID); err != nil {
+		s.log.Warn("could not remove an uncommitted blob; the collector will reclaim it",
+			"blob", blobID, "reason", reason, "error", err)
+	}
+}
+
 func (s *Service) checkSpace() error {
 	space, err := s.blobs.Space()
 	if err != nil {
-		return nil // an unreadable statfs is not a reason to refuse uploads
+		// An unreadable statfs is not a reason to refuse uploads: the volume is
+		// far more likely to be fine than not, and the alternative is an outage
+		// caused by a failed syscall that says nothing about free space.
+		s.log.Warn("could not read free space on the blob volume; accepting the upload anyway", "error", err)
+		//nolint:nilerr // a failed capacity probe must not become a refused upload
+		return nil
 	}
 	if space.UsedRatio()*100 >= float64(s.cfg.DiskHighWatermarkPct) {
 		return ErrStorageFull

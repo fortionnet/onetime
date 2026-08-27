@@ -47,13 +47,27 @@ func Supported() []string {
 // IsSupported reports whether lang is one of the languages the frontend can
 // render. Comparison is case-insensitive and tolerates surrounding space.
 func IsSupported(lang string) bool {
+	_, ok := Canonical(lang)
+	return ok
+}
+
+// Canonical resolves lang to the exact code this package uses for it, or
+// reports that it names no supported language.
+//
+// The returned string is one of this package's own constants rather than a
+// reshaped copy of the argument. That distinction matters to callers that put
+// the result into a URL: "EN" and "en" both name English, but only one of them
+// is a path this service actually serves, and a caller that echoes back what it
+// was given is building the URL out of request data instead of out of a fixed
+// set.
+func Canonical(lang string) (string, bool) {
 	lang = normalize(lang)
 	for _, l := range supportedLangs {
 		if l == lang {
-			return true
+			return l, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // T translates key into lang. An unknown language falls back to DefaultLang,
@@ -143,6 +157,13 @@ func normalize(lang string) string {
 // Czech — the source catalog.
 // ---------------------------------------------------------------------------
 
+// The catalogues below trip gosec's hardcoded-credential heuristic, which sees
+// keys like "create.pass.label" or "gate.pass.placeholder" next to string
+// literals and infers a password. They are user-interface copy: the words for
+// "password" in two languages, on the labels of the fields a passphrase is
+// typed into. No credential is stored anywhere in this package.
+//
+//nolint:gosec // G101: UI copy about passphrases, not a passphrase
 var cs = map[string]string{
 	// -- chrome ------------------------------------------------------------
 	"site.name":        "onetime",
@@ -428,6 +449,7 @@ var cs = map[string]string{
 // English.
 // ---------------------------------------------------------------------------
 
+//nolint:gosec // G101: UI copy about passphrases, not a passphrase; see the note on cs
 var en = map[string]string{
 	// -- chrome ------------------------------------------------------------
 	"site.name":        "onetime",

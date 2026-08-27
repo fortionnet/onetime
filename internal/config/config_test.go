@@ -170,7 +170,7 @@ func TestStrictStartupRejectsWorldReadableKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if err := cfg.Validate(); err == nil {
+	if validateErr := cfg.Validate(); validateErr == nil {
 		t.Fatal("Validate accepted a group- and world-readable keyring")
 	}
 
@@ -280,5 +280,76 @@ func TestNoRateLimitOverridesByDefault(t *testing.T) {
 	got, problems := cfg.RateLimitOverrides()
 	if len(got) != 0 || len(problems) != 0 {
 		t.Fatalf("a bare environment produced overrides %+v / problems %v", got, problems)
+	}
+}
+
+// TestArgon2ParamsRejectNonsense covers the narrowing from the environment's
+// ints to the widths argon2 takes. These used to be unchecked casts, where a
+// value one past the type's ceiling wrapped to a tiny one: the service would
+// start, answer every probe, and quietly protect passphrases with a KDF costing
+// a kilobyte of memory. Every case below is one that wrapped rather than failed.
+func TestArgon2ParamsRejectNonsense(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		mem, time, lanes int
+	}{
+		{"memory past uint32 wraps to 1 KiB", 1 << 32, 2, 1},
+		{"memory zero", 0, 2, 1},
+		{"memory negative", -1, 2, 1},
+		{"time past uint32 wraps to zero", 1 << 32, 1 << 32, 1},
+		{"time zero", 19456, 0, 1},
+		{"time negative", 19456, -2, 1},
+		{"lanes past uint8 wrap to zero", 19456, 2, 256},
+		{"lanes zero", 19456, 2, 0},
+		{"lanes negative", 19456, 2, -1},
+		{"memory too small for the lane count", 16, 2, 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, _, err := argon2Params(tc.mem, tc.time, tc.lanes); err == nil {
+				t.Errorf("argon2Params(%d, %d, %d) was accepted, want an error",
+					tc.mem, tc.time, tc.lanes)
+			}
+		})
+	}
+}
+
+// TestArgon2ParamsAcceptUsableCosts guards the other direction: the bounds must
+// stay wide enough to tune, or an operator on a small node cannot lower the
+// cost and one on a large node cannot raise it.
+func TestArgon2ParamsAcceptUsableCosts(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		mem, time, lanes int
+		wantMem          uint32
+		wantTime         uint32
+		wantLanes        uint8
+	}{
+		{"the OWASP minimum this service defaults to", 19456, 2, 1, 19456, 2, 1},
+		{"a cheap setting for a constrained node", 8192, 1, 1, 8192, 1, 1},
+		{"an expensive setting for a large one", 1 << 20, 8, 4, 1 << 20, 8, 4},
+		{"the very top of each range", argon2MaxMemKiB, argon2MaxTime, argon2MaxPar,
+			argon2MaxMemKiB, argon2MaxTime, argon2MaxPar},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mem, time, lanes, err := argon2Params(tc.mem, tc.time, tc.lanes)
+			if err != nil {
+				t.Fatalf("argon2Params(%d, %d, %d): %v", tc.mem, tc.time, tc.lanes, err)
+			}
+			if mem != tc.wantMem || time != tc.wantTime || lanes != tc.wantLanes {
+				t.Errorf("got %d/%d/%d, want %d/%d/%d",
+					mem, time, lanes, tc.wantMem, tc.wantTime, tc.wantLanes)
+			}
+		})
+	}
+}
+
+// TestLoadRejectsBadArgon2Env checks the bounds are actually reached from the
+// environment, not just from a direct call: a startup that survives a wrapped
+// cost parameter is the failure this guards against.
+func TestLoadRejectsBadArgon2Env(t *testing.T) {
+	setupEnv(t)
+	t.Setenv("ONETIME_ARGON2_MEM_KIB", "4294967297")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load accepted an Argon2 memory cost past the uint32 ceiling")
 	}
 }

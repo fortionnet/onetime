@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -65,7 +66,7 @@ func newHarness(t *testing.T) *harness {
 	deriver := crypto.NewDeriver(ring, crypto.KDFParams{MemKiB: 64, Time: 1, Par: 1}, 2)
 
 	h := &harness{
-		svc: New(cfg, store.NewWithClient(client), blobs, deriver),
+		svc: New(cfg, store.NewWithClient(client), blobs, deriver, nil),
 		mr:  mr,
 		cfg: cfg,
 		now: time.Now().UTC().Truncate(time.Second),
@@ -129,12 +130,12 @@ func TestRevealIsSingleUse(t *testing.T) {
 	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true}); err != nil {
 		t.Fatalf("first reveal: %v", err)
 	}
-	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true}); err != ErrAlreadyRevealed {
+	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true}); !errors.Is(err, ErrAlreadyRevealed) {
 		t.Fatalf("second reveal error = %v, want ErrAlreadyRevealed", err)
 	}
 	// A peek after the fact should say the same thing, so the recipient page
 	// can explain what happened instead of showing "no such link".
-	if _, err := h.svc.Peek(ctx, key); err != ErrAlreadyRevealed {
+	if _, err := h.svc.Peek(ctx, key); !errors.Is(err, ErrAlreadyRevealed) {
 		t.Fatalf("peek after reveal error = %v, want ErrAlreadyRevealed", err)
 	}
 }
@@ -149,7 +150,7 @@ func TestRevealNeedsConfirmation(t *testing.T) {
 	created, _ := h.svc.CreateText(ctx, CreateTextRequest{Text: []byte("safe")})
 	key := fragment(t, created.SecretURL)
 
-	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: key}); err != ErrConfirmationRequired {
+	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: key}); !errors.Is(err, ErrConfirmationRequired) {
 		t.Fatalf("unconfirmed reveal error = %v, want ErrConfirmationRequired", err)
 	}
 	// And the secret is untouched.
@@ -181,14 +182,14 @@ func TestBadPassphraseDoesNotBurn(t *testing.T) {
 	if !created.HasPassphrase {
 		t.Fatal("created secret does not report a passphrase")
 	}
-	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true}); err != ErrPassphraseRequired {
-		t.Fatalf("missing passphrase error = %v, want ErrPassphraseRequired", err)
+	if _, revealErr := h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true}); !errors.Is(revealErr, ErrPassphraseRequired) {
+		t.Fatalf("missing passphrase error = %v, want ErrPassphraseRequired", revealErr)
 	}
 
 	for i := range 4 {
-		_, err := h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true, Passphrase: crypto.Passphrase("wrong")})
-		if err != ErrBadPassphrase {
-			t.Fatalf("attempt %d error = %v, want ErrBadPassphrase", i+1, err)
+		_, attemptErr := h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true, Passphrase: crypto.Passphrase("wrong")})
+		if !errors.Is(attemptErr, ErrBadPassphrase) {
+			t.Fatalf("attempt %d error = %v, want ErrBadPassphrase", i+1, attemptErr)
 		}
 	}
 	// After four wrong guesses the right one still works.
@@ -215,7 +216,7 @@ func TestPassphraseLockout(t *testing.T) {
 		_, _ = h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true, Passphrase: crypto.Passphrase("nope")})
 	}
 	// Now even the correct passphrase is throttled.
-	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true, Passphrase: crypto.Passphrase("right")}); err != ErrTooManyAttempts {
+	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true, Passphrase: crypto.Passphrase("right")}); !errors.Is(err, ErrTooManyAttempts) {
 		t.Fatalf("error during lockout = %v, want ErrTooManyAttempts", err)
 	}
 	// The window passes and the secret is readable again.
@@ -241,10 +242,10 @@ func TestSustainedGuessingDestroysSecret(t *testing.T) {
 		// Step past the rolling window so the throttle does not mask the total.
 		h.advance(h.cfg.PassphraseWindow + time.Second)
 	}
-	if lastErr != ErrDestroyed {
+	if !errors.Is(lastErr, ErrDestroyed) {
 		t.Fatalf("final attempt error = %v, want ErrDestroyed", lastErr)
 	}
-	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true, Passphrase: crypto.Passphrase("right")}); err != ErrDestroyed {
+	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true, Passphrase: crypto.Passphrase("right")}); !errors.Is(err, ErrDestroyed) {
 		t.Fatalf("reveal after destruction = %v, want ErrDestroyed", err)
 	}
 }
@@ -272,13 +273,13 @@ func TestSenderCanBurnWithoutSeeingContent(t *testing.T) {
 	if burned.State != store.StateBurned {
 		t.Fatalf("state after burn = %q, want burned", burned.State)
 	}
-	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: secretKey, Confirm: true}); err != ErrBurned {
+	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: secretKey, Confirm: true}); !errors.Is(err, ErrBurned) {
 		t.Fatalf("reveal after burn = %v, want ErrBurned", err)
 	}
 
 	// The receipt key must not be usable as a secret key: the sender can
 	// destroy their secret, but cannot read it back.
-	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: receiptKey, Confirm: true}); err != ErrNotFound {
+	if _, err := h.svc.Reveal(ctx, RevealRequest{Key: receiptKey, Confirm: true}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("revealing with the receipt key = %v, want ErrNotFound", err)
 	}
 }
@@ -361,7 +362,7 @@ func TestFileRoundTrip(t *testing.T) {
 
 	// Completing the transfer removes the file from the volume.
 	dl.Done(true)
-	if _, err := h.svc.OpenDownload(ctx, revealed.Ticket); err != ErrTicketExpired {
+	if _, err := h.svc.OpenDownload(ctx, revealed.Ticket); !errors.Is(err, ErrTicketExpired) {
 		t.Fatalf("download after completion = %v, want ErrTicketExpired", err)
 	}
 }
@@ -426,7 +427,7 @@ func TestTTLBounds(t *testing.T) {
 	}
 
 	for _, days := range []int{h.cfg.TTLMaxDays + 1, -5, 9999} {
-		if _, err := h.svc.CreateText(ctx, CreateTextRequest{Text: []byte("x"), TTLDays: days}); err != ErrBadTTL {
+		if _, err := h.svc.CreateText(ctx, CreateTextRequest{Text: []byte("x"), TTLDays: days}); !errors.Is(err, ErrBadTTL) {
 			t.Fatalf("CreateText(ttl=%d) error = %v, want ErrBadTTL", days, err)
 		}
 	}
@@ -445,14 +446,14 @@ func TestRejectsEmptyAndOversized(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 
-	if _, err := h.svc.CreateText(ctx, CreateTextRequest{}); err != ErrEmpty {
+	if _, err := h.svc.CreateText(ctx, CreateTextRequest{}); !errors.Is(err, ErrEmpty) {
 		t.Fatalf("empty text error = %v, want ErrEmpty", err)
 	}
 	big := make([]byte, h.cfg.MaxTextBytes+1)
-	if _, err := h.svc.CreateText(ctx, CreateTextRequest{Text: big}); err != ErrTooLarge {
+	if _, err := h.svc.CreateText(ctx, CreateTextRequest{Text: big}); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("oversized text error = %v, want ErrTooLarge", err)
 	}
-	if _, err := h.svc.CreateFile(ctx, CreateFileRequest{Declared: h.cfg.MaxFileBytes + 1}, bytes.NewReader(nil)); err != ErrTooLarge {
+	if _, err := h.svc.CreateFile(ctx, CreateFileRequest{Declared: h.cfg.MaxFileBytes + 1}, bytes.NewReader(nil)); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("oversized file error = %v, want ErrTooLarge", err)
 	}
 }
@@ -482,10 +483,10 @@ func TestUnknownLinkLooksLikeNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	for _, key := range []string{"", "garbage", strings.Repeat("A", 43)} {
-		if _, err := h.svc.Peek(ctx, key); err != ErrNotFound {
+		if _, err := h.svc.Peek(ctx, key); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("Peek(%q) error = %v, want ErrNotFound", key, err)
 		}
-		if _, err := h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true}); err != ErrNotFound {
+		if _, err := h.svc.Reveal(ctx, RevealRequest{Key: key, Confirm: true}); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("Reveal(%q) error = %v, want ErrNotFound", key, err)
 		}
 	}
@@ -498,7 +499,7 @@ func TestExpiredSecretIsGoneButSenderStillSeesWhy(t *testing.T) {
 	created, _ := h.svc.CreateText(ctx, CreateTextRequest{Text: []byte("x"), TTLDays: 1})
 	h.advance(48 * time.Hour)
 
-	if _, err := h.svc.Peek(ctx, fragment(t, created.SecretURL)); err != ErrNotFound {
+	if _, err := h.svc.Peek(ctx, fragment(t, created.SecretURL)); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("peek on an expired secret = %v, want ErrNotFound", err)
 	}
 	status, err := h.svc.ReceiptStatus(ctx, fragment(t, created.ReceiptURL))
@@ -538,7 +539,7 @@ func TestReadOnlyRefusesWritesButAllowsReads(t *testing.T) {
 	created, _ := h.svc.CreateText(ctx, CreateTextRequest{Text: []byte("before maintenance")})
 	h.cfg.ReadOnly = true
 
-	if _, err := h.svc.CreateText(ctx, CreateTextRequest{Text: []byte("x")}); err != ErrReadOnly {
+	if _, err := h.svc.CreateText(ctx, CreateTextRequest{Text: []byte("x")}); !errors.Is(err, ErrReadOnly) {
 		t.Fatalf("create while read-only = %v, want ErrReadOnly", err)
 	}
 	// Existing links keep working, which is the point of the switch.

@@ -24,6 +24,17 @@ spec:
   podSelector:
     matchLabels:
       {{- include "onetime.selectorLabels" . | nindent 6 }}
+    matchExpressions:
+      # The `helm test` hook wears the same chart labels but is not part of the
+      # application, and without this it is captured by the policy above —
+      # inheriting the default-deny egress and losing its ability to reach the
+      # very Service it exists to probe. A pod with no component label (the
+      # application itself) still matches, because NotIn is satisfied by an
+      # absent key.
+      - key: app.kubernetes.io/component
+        operator: NotIn
+        values:
+          - test
   policyTypes:
     - Ingress
     - Egress

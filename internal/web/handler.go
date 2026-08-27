@@ -110,13 +110,21 @@ func (h *Handler) handleRoot(w http.ResponseWriter, r *http.Request) {
 		h.handleLLMs(w, r)
 		return
 	}
-	lang := h.language(r)
-	http.Redirect(w, r, "/"+lang+"/", http.StatusFound)
+	// h.language returns one of i18n's own language constants — never a string
+	// derived from the request — so the target is picked from a fixed set of
+	// two and cannot be steered into a scheme-relative "//evil" or an absolute
+	// URL. See the note on language for why that guarantee is explicit.
+	//nolint:gosec // G710: the target comes from i18n's fixed language set, not from request data
+	http.Redirect(w, r, "/"+h.language(r)+"/", http.StatusFound)
 }
 
 // redirectToLang sends an unprefixed page URL to the visitor's language.
 func (h *Handler) redirectToLang(page string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// page is a compile-time constant from Register and h.language returns
+		// one of i18n's language constants, so both halves of this target are
+		// fixed strings rather than request data.
+		//nolint:gosec // G710: both path segments come from fixed sets, not from request data
 		http.Redirect(w, r, "/"+h.language(r)+"/"+page, http.StatusFound)
 	}
 }
@@ -241,26 +249,36 @@ var Version = "dev"
 
 // language picks the display language: an explicit choice beats the browser's
 // preference, which beats the configured default.
+//
+// Every return is a code i18n vouches for, never the caller's spelling of it.
+// ?lang=EN names a supported language but is not a route this service serves,
+// and the result is pasted straight into a redirect target, so handing back the
+// raw parameter would answer with a 302 to a page that does not exist — and
+// would make the redirect target a function of request data.
 func (h *Handler) language(r *http.Request) string {
-	if q := r.URL.Query().Get("lang"); i18n.IsSupported(q) {
-		return q
+	if lang, ok := i18n.Canonical(r.URL.Query().Get("lang")); ok {
+		return lang
 	}
 	cookie := ""
 	if c, err := r.Cookie(langCookie); err == nil {
 		cookie = c.Value
 	}
-	lang := i18n.Match(r.Header.Get("Accept-Language"), cookie)
-	if !i18n.IsSupported(lang) {
-		return h.cfg.DefaultLang
+	if lang, ok := i18n.Canonical(i18n.Match(r.Header.Get("Accept-Language"), cookie)); ok {
+		return lang
 	}
-	return lang
+	if lang, ok := i18n.Canonical(h.cfg.DefaultLang); ok {
+		return lang
+	}
+	return i18n.DefaultLang
 }
 
 // languageFromPath reads the language out of a /{lang}/... route.
 func (h *Handler) languageFromPath(r *http.Request) string {
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/"), "/", 2)
-	if len(parts) > 0 && i18n.IsSupported(parts[0]) {
-		return parts[0]
+	if len(parts) > 0 {
+		if lang, ok := i18n.Canonical(parts[0]); ok {
+			return lang
+		}
 	}
 	return h.language(r)
 }
@@ -292,7 +310,15 @@ func otherLang(current string) string {
 
 func (h *Handler) handleRobots(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte("User-agent: *\nDisallow: /s/\nDisallow: /m/\nDisallow: /api/\nAllow: /\n"))
+	writeBody(w, []byte("User-agent: *\nDisallow: /s/\nDisallow: /m/\nDisallow: /api/\nAllow: /\n"))
+}
+
+// writeBody sends a body whose response is already committed: the headers have
+// gone out, so a failure cannot be turned into an error page. The realistic
+// cause is a visitor who navigated away mid-response, which is not a fault of
+// this service and not something it can act on.
+func writeBody(w http.ResponseWriter, body []byte) {
+	_, _ = w.Write(body) //nolint:errcheck // response already in flight; nothing actionable
 }
 
 // plausibleID rejects obviously wrong record ids before rendering, so a
@@ -337,10 +363,7 @@ func humanBytes(n int64, lang string) string {
 	// "50.0 MB" just makes a round limit look unrounded. This matches the
 	// browser-side formatter, which leans on Intl for the same effect.
 	size := float64(n) / float64(div)
-	value := strconv.FormatFloat(size, 'f', 1, 64)
-	if strings.HasSuffix(value, ".0") {
-		value = strings.TrimSuffix(value, ".0")
-	}
+	value := strings.TrimSuffix(strconv.FormatFloat(size, 'f', 1, 64), ".0")
 	if lang == "cs" {
 		value = strings.Replace(value, ".", ",", 1)
 	}

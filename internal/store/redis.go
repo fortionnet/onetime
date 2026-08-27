@@ -76,7 +76,10 @@ func (r *Redis) CheckEvictionPolicy(ctx context.Context) error {
 	res, err := r.c.ConfigGet(ctx, "maxmemory-policy").Result()
 	if err != nil {
 		// miniredis and some managed providers do not expose CONFIG GET. An
-		// unanswerable question is not a failed check.
+		// unanswerable question is not a failed check: reporting it would fail
+		// a strict startup on providers where the setting is fine but simply
+		// not readable.
+		//nolint:nilerr // an unanswerable check is not a failed check; see above
 		return nil
 	}
 	policy, ok := res["maxmemory-policy"]

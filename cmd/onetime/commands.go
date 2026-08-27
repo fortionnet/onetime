@@ -46,7 +46,9 @@ func runHealthcheck() error {
 		return fmt.Errorf("probe %s: %w", url, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	// Drain so the connection can be reused. The probe's verdict is the status
+	// code alone, so a short read here changes nothing about the answer.
+	_, _ = io.Copy(io.Discard, resp.Body) //nolint:errcheck // draining a probe body; its contents are never read
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("probe %s returned %d", url, resp.StatusCode)
@@ -92,8 +94,8 @@ func runGC(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	if err := st.Ping(ctx); err != nil {
-		return fmt.Errorf("redis is unreachable: %w", err)
+	if pingErr := st.Ping(ctx); pingErr != nil {
+		return fmt.Errorf("redis is unreachable: %w", pingErr)
 	}
 
 	blobs, err := blob.New(cfg.DataDir, cfg.TmpDir)

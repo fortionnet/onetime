@@ -68,9 +68,8 @@ func (s *Server) handleCreateText(w http.ResponseWriter, r *http.Request) {
 	var req secret.CreateTextRequest
 	req.Source = "api"
 
-	ct := contentType(r)
-	switch {
-	case ct == "application/json":
+	switch contentType(r) {
+	case "application/json":
 		var body createRequest
 		if !decodeJSON(w, r, &body, s.cfg.MaxTextBytes+4096) {
 			return
@@ -208,6 +207,15 @@ func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
 		resp.TicketExpiresIn = int(revealed.TicketTTL.Seconds())
 		// The cookie lets a browser start the download by navigating, without
 		// buffering the whole file through JavaScript first.
+		//
+		// Secure is conditional so that a plain-HTTP local development instance
+		// still works; everything that actually protects the ticket is not.
+		// HttpOnly and SameSite=Strict are unconditional, the value is a
+		// single-use ticket with a five-minute life, and the __Host- prefix
+		// makes the browser itself refuse the cookie unless it arrived over
+		// HTTPS from the origin root — so on any deployment whose BaseURL is
+		// https (which production always is) the flag is enforced twice over.
+		//nolint:gosec // G124: Secure is gated on an https BaseURL for local dev; the __Host- prefix enforces it in the browser regardless
 		http.SetCookie(w, &http.Cookie{
 			Name:     "__Host-onetime_dl",
 			Value:    revealed.Ticket,

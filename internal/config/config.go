@@ -174,7 +174,9 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.Argon2MemKiB, c.Argon2Time, c.Argon2Par = uint32(mem), uint32(tm), uint8(par)
+	if c.Argon2MemKiB, c.Argon2Time, c.Argon2Par, err = argon2Params(mem, tm, par); err != nil {
+		return nil, err
+	}
 
 	c.EnableFiles = envBool("ONETIME_ENABLE_FILES", true)
 	c.ReadOnly = envBool("ONETIME_READ_ONLY", false)
@@ -185,6 +187,55 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	return c, c.check()
+}
+
+// Bounds for the Argon2id cost parameters.
+//
+// The floors are the algorithm's own limits, not a policy: argon2 needs at
+// least 8 KiB of memory per lane and at least one pass, and rejects anything
+// less. The ceilings are the point past which a single passphrase check would
+// exhaust the container or outlast the request timeout, which is a denial of
+// service dressed up as a security setting. Both are far enough apart that an
+// operator can still trade cost against latency in either direction.
+const (
+	argon2MinMemKiB = 8
+	argon2MaxMemKiB = 4 << 20 // 4 GiB expressed in KiB
+	argon2MinTime   = 1
+	argon2MaxTime   = 64
+	argon2MinPar    = 1
+	argon2MaxPar    = 255 // the width of the argon2 threads parameter
+)
+
+// argon2Params narrows the Argon2id knobs from the ints the environment yields
+// into the widths golang.org/x/crypto/argon2 takes.
+//
+// The range checks are what makes that narrowing safe rather than a cast that
+// wraps. Without them ONETIME_ARGON2_MEM_KIB=4294967297 becomes 1 KiB and
+// ONETIME_ARGON2_PAR=256 becomes 0 — in the first case the passphrase KDF
+// silently stops being expensive, in the second argon2 panics on the first
+// reveal. Both are worth refusing to start over: a misconfigured cost is not
+// something anyone will notice from the outside until it matters.
+func argon2Params(memKiB, timeCost, lanes int) (uint32, uint32, uint8, error) {
+	if memKiB < argon2MinMemKiB || memKiB > argon2MaxMemKiB {
+		return 0, 0, 0, fmt.Errorf("ONETIME_ARGON2_MEM_KIB must be within [%d,%d], got %d",
+			argon2MinMemKiB, argon2MaxMemKiB, memKiB)
+	}
+	if timeCost < argon2MinTime || timeCost > argon2MaxTime {
+		return 0, 0, 0, fmt.Errorf("ONETIME_ARGON2_TIME must be within [%d,%d], got %d",
+			argon2MinTime, argon2MaxTime, timeCost)
+	}
+	if lanes < argon2MinPar || lanes > argon2MaxPar {
+		return 0, 0, 0, fmt.Errorf("ONETIME_ARGON2_PAR must be within [%d,%d], got %d",
+			argon2MinPar, argon2MaxPar, lanes)
+	}
+	// argon2 divides the memory between the lanes and rejects a configuration
+	// that leaves any lane under 8 KiB, so the two knobs cannot be checked
+	// independently of each other.
+	if memKiB < 8*lanes {
+		return 0, 0, 0, fmt.Errorf("ONETIME_ARGON2_MEM_KIB (%d) must be at least 8 KiB per lane: >= %d for ONETIME_ARGON2_PAR=%d",
+			memKiB, 8*lanes, lanes)
+	}
+	return uint32(memKiB), uint32(timeCost), uint8(lanes), nil
 }
 
 // check validates values that do not require touching the filesystem.

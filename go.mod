@@ -2,6 +2,13 @@ module github.com/fortionnet/onetime
 
 go 1.25.0
 
+// Pinned to a patched release. The `go` directive above is the language
+// version and stays conservative, but it is also what CI feeds to setup-go —
+// and building with 1.25.0 pulled in 32 known standard-library
+// vulnerabilities that govulncheck rightly refused to pass. The runtime image
+// already used a patched toolchain; this makes CI agree.
+toolchain go1.25.14
+
 require (
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/prometheus/client_golang v1.24.1

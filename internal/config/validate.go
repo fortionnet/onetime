@@ -93,14 +93,26 @@ func sameDevice(a, b string) (bool, error) {
 	return da == db, nil
 }
 
-func deviceOf(path string) (uint64, error) {
+// deviceOf returns an opaque token identifying the filesystem a path lives on.
+//
+// It is rendered as a string rather than a number on purpose: Stat_t.Dev is
+// uint64 on Linux and int32 on Darwin, and any numeric return type would need a
+// conversion that is redundant on one platform and lossy on the other. Nothing
+// interprets the value — it exists only to be compared with another one — so
+// the exact formatting is irrelevant as long as it is injective, which decimal
+// rendering of an integer is.
+//
+// An empty token means the platform did not supply one. Both paths then compare
+// equal, which deliberately skips the check rather than failing a start on a
+// platform this cannot inspect.
+func deviceOf(path string) (string, error) {
 	fi, err := os.Stat(filepath.Clean(path))
 	if err != nil {
-		return 0, fmt.Errorf("stat %s: %w", path, err)
+		return "", fmt.Errorf("stat %s: %w", path, err)
 	}
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
-		return 0, nil // unknown platform: skip the check rather than fail
+		return "", nil
 	}
-	return uint64(st.Dev), nil
+	return fmt.Sprint(st.Dev), nil
 }

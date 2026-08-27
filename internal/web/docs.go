@@ -56,7 +56,7 @@ func (h *Handler) handleLLMs(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=300")
-	_, _ = w.Write(h.llms.body)
+	writeBody(w, h.llms.body)
 }
 
 func (h *Handler) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
@@ -67,5 +67,5 @@ func (h *Handler) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=300")
-	_, _ = w.Write(body)
+	writeBody(w, body)
 }

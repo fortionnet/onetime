@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -178,7 +179,7 @@ func TestEnvelopeRejectsWrongInputs(t *testing.T) {
 	for name, setup := range cases {
 		t.Run(name, func(t *testing.T) {
 			badKEK, ct, ad := setup()
-			if _, err := UnwrapDEK(badKEK, ct, ad); err != ErrBadPassphrase {
+			if _, err := UnwrapDEK(badKEK, ct, ad); !errors.Is(err, ErrBadPassphrase) {
 				t.Fatalf("UnwrapDEK error = %v, want ErrBadPassphrase", err)
 			}
 		})
@@ -324,11 +325,11 @@ func TestStreamLargePayloadStreams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStreamWriter: %v", err)
 	}
-	if _, err := io.Copy(w, io.LimitReader(rand.Reader, size)); err != nil {
-		t.Fatalf("copy in: %v", err)
+	if _, copyErr := io.Copy(w, io.LimitReader(rand.Reader, size)); copyErr != nil {
+		t.Fatalf("copy in: %v", copyErr)
 	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	if closeErr := w.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
 	}
 	r, err := NewStreamReader(dek, bytes.NewReader(sealed.Bytes()), nil)
 	if err != nil {

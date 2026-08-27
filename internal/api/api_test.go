@@ -74,11 +74,14 @@ func newTestServer(t *testing.T) *testServer {
 	deriver := crypto.NewDeriver(ring, crypto.KDFParams{MemKiB: 64, Time: 1, Par: 1}, 2)
 
 	st := store.NewWithClient(client)
-	svc := secret.New(cfg, st, blobs, deriver)
 	limiter := ratelimit.New(st, nil, nil, []byte("test-pepper"), false)
 
 	logBuf := &lockedBuffer{}
 	log := slog.New(slog.NewJSONHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// The service shares the captured logger so that TestNoSecretMaterialInLogs
+	// covers the domain layer's log lines too, not just the HTTP layer's.
+	svc := secret.New(cfg, st, blobs, deriver, log)
 
 	mux := http.NewServeMux()
 	New(cfg, svc, limiter, log).Register(mux)

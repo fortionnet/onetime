@@ -52,7 +52,7 @@ func (h *Health) SetStarted(fn func() bool) { h.ready = fn }
 func (h *Health) Live(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write([]byte(`{"status":"ok"}` + "\n"))
+	writeBody(w, `{"status":"ok"}`)
 }
 
 // Started handles the startup probe.
@@ -61,10 +61,10 @@ func (h *Health) Started(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if h.ready != nil && !h.ready() {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"status":"starting"}` + "\n"))
+		writeBody(w, `{"status":"starting"}`)
 		return
 	}
-	_, _ = w.Write([]byte(`{"status":"ok"}` + "\n"))
+	writeBody(w, `{"status":"ok"}`)
 }
 
 // Ready handles the readiness probe, reporting each dependency separately so
@@ -89,10 +89,22 @@ func (h *Health) Ready(w http.ResponseWriter, r *http.Request) {
 	if !healthy {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	writeJSONBody(w, map[string]any{
 		"status": statusWord(healthy),
 		"checks": results,
 	})
+}
+
+// writeBody and writeJSONBody send a probe response whose headers have already
+// gone out. A write failure here cannot be turned into a different answer, and
+// the only realistic cause is a kubelet that gave up before we replied — which
+// it will treat as a failed probe regardless of what we do next.
+func writeBody(w http.ResponseWriter, body string) {
+	_, _ = w.Write([]byte(body + "\n")) //nolint:errcheck // response already in flight; nothing actionable
+}
+
+func writeJSONBody(w http.ResponseWriter, v any) {
+	_ = json.NewEncoder(w).Encode(v) //nolint:errcheck // response already in flight; nothing actionable
 }
 
 // run applies a short cache so that a probe every few seconds does not turn
