@@ -19,9 +19,10 @@ metadata:
     app.kubernetes.io/component: test
   annotations:
     helm.sh/hook: test
-    # Keep the pod around on failure so `kubectl logs` still works; the
-    # succeeded case is cleaned up.
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    # Only replaced on the next run, never deleted on success. `helm test
+    # --logs` fetches the pod's output *after* the hook finishes, so deleting a
+    # passing pod makes a successful test report a failure it cannot explain.
+    helm.sh/hook-delete-policy: before-hook-creation
     helm.sh/hook-weight: "1"
 spec:
   restartPolicy: Never

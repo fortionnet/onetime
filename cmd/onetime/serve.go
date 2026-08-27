@@ -163,7 +163,7 @@ func setup(ctx context.Context) (*app, error) {
 
 	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if pingErr := st.Ping(pingCtx); pingErr != nil {
+	if pingErr := waitForRedis(pingCtx, st, log); pingErr != nil {
 		return nil, fmt.Errorf("redis is unreachable at startup: %w", pingErr)
 	}
 	if policyErr := st.CheckEvictionPolicy(pingCtx); policyErr != nil {
@@ -442,5 +442,38 @@ func applyRateLimitOverrides(cfg *config.Config, limiter *ratelimit.Limiter, log
 	}
 	for action, policy := range overrides {
 		log.Info("rate limit overridden", "action", action, "per_hour", policy.PerHour, "burst", policy.Burst)
+	}
+}
+
+// waitForRedis blocks until Redis answers or the context runs out.
+//
+// Redis runs as a sidecar, and Kubernetes gives no ordering guarantee between
+// containers in a pod: on a cold start the application frequently wins the race
+// and finds nothing listening. Exiting there is technically correct — the pod
+// restarts and the second attempt succeeds — but it turns every rollout into a
+// CrashLoopBackOff whose exponential delay grows each time, for a condition
+// that resolves itself in a second or two.
+func waitForRedis(ctx context.Context, st *store.Redis, log *slog.Logger) error {
+	const probe = 500 * time.Millisecond
+	var lastErr error
+	for attempt := 1; ; attempt++ {
+		lastErr = st.Ping(ctx)
+		if lastErr == nil {
+			if attempt > 1 {
+				log.Info("redis became reachable", "attempts", attempt)
+			}
+			return nil
+		}
+		if ctx.Err() != nil {
+			return lastErr
+		}
+		if attempt == 1 {
+			log.Info("waiting for redis", "error", lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return lastErr
+		case <-time.After(probe):
+		}
 	}
 }
