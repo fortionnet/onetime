@@ -110,8 +110,18 @@ export function init() {
     hide(dropZone);
     clearError();
     if (maxFileBytes > 0 && file.size > maxFileBytes) {
-      showError(t('js.err.payload_too_large') + ' ' + formatBytes(maxFileBytes));
+      showError(tooLarge());
     }
+  }
+
+  // Two sentences, not a string and a number glued together: the size has to
+  // read as part of the message, whichever language it is in.
+  function tooLarge() {
+    return (
+      t('js.err.payload_too_large') +
+      ' ' +
+      t('js.err.max_size', { size: formatBytes(maxFileBytes) })
+    );
   }
 
   function clearFile() {
@@ -305,12 +315,12 @@ export function init() {
 
     if (mode === 'file') {
       if (!selectedFile) {
-        showError(t('js.err.empty'));
+        showError(t('js.err.no_file'));
         $('#file-pick')?.focus();
         return;
       }
       if (maxFileBytes > 0 && selectedFile.size > maxFileBytes) {
-        showError(t('js.err.payload_too_large') + ' ' + formatBytes(maxFileBytes));
+        showError(tooLarge());
         return;
       }
       await sendFile({ ttlDays, passphrase });

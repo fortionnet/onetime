@@ -23,7 +23,7 @@ Data keys consumed here (all supplied by the handler):
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light">
 <title>{{.Title}}</title>
-<meta name="description" content="{{call .T "footer.tagline"}}">
+<meta name="description" content="{{call .T "site.description"}}">
 {{- if or (eq .Page "gate") (eq .Page "receipt") (eq .Page "status")}}
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">

@@ -86,7 +86,11 @@ export function messageFor(err) {
   const code = err.code;
   if (!code) return t('js.err.generic');
   const key = 'js.err.' + code;
-  const msg = t(key);
+  // Some messages quote a configured limit, which only the page knows.
+  const msg = t(key, {
+    min: document.body?.dataset.ttlMin || '',
+    max: document.body?.dataset.ttlMax || '',
+  });
   // t() echoes unknown keys back, which would put "js.err.foo" on the screen.
   return msg === key ? err.detail || t('js.err.generic') : msg;
 }
