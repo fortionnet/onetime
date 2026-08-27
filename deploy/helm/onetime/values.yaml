@@ -1,0 +1,559 @@
+# Default values for onetime.
+#
+# The comments here are not decoration — several of these defaults encode
+# failure modes that cost real downtime or real data. Where a value says
+# "do not change", the reason is spelled out.
+
+# -- Number of application replicas.
+#
+# FIXED AT 1, and values.schema.json enforces `maximum: 1`.
+#
+# The blob store is a ReadWriteOnce PersistentVolume and the app performs
+# atomic rename() from tmp into blobs. Two replicas would need RWX storage AND
+# a distributed lock around the GC/reconcile loops, neither of which exists.
+# Scaling this to 2 does not give you HA; it gives you a second pod stuck in
+# ContainerCreating on a Multi-Attach error while the first one keeps serving.
+replicaCount: 1
+
+image:
+  registry: ghcr.io
+  repository: fortionnet/onetime
+  # -- Overrides Chart.appVersion. Prefer pinning a digest in production.
+  tag: ""
+  # -- Immutable pin, e.g. "sha256:abc...". Wins over tag when set.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+# - name: ghcr-credentials
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Small helper image used by the init container. It has two jobs that the
+# distroless app image cannot do (it has no shell and no coreutils):
+#
+#  1. Pre-create the data subdirectories with the right ownership. Kubelet
+#     creates `subPath` directories as root:root 0755 *after* fsGroup has been
+#     applied, so a non-root app cannot write into a freshly created subPath.
+#     Creating them here, as uid 65532, sidesteps that.
+#  2. Copy the master keyring into a memory-backed volume with mode 0400.
+#     See masterKey.hardenPermissions below for why that copy is necessary.
+initImage:
+  repository: busybox
+  tag: "1.37.0-musl"
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+  # The app never calls the Kubernetes API. Mounting a token would hand an
+  # attacker who achieves RCE a cluster credential for free.
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+
+# ---------------------------------------------------------------------------
+# Application configuration — rendered into a ConfigMap as ONETIME_* env vars.
+# ---------------------------------------------------------------------------
+config:
+  # -- REQUIRED. Public origin, used to build the one-time links themselves.
+  # Must be https:// in production: the secret id travels in the URL, and a
+  # single http:// link exposes it to anyone on the path.
+  baseURL: "https://onetime.fortion.cloud"
+
+  listenPort: 8080
+  # Metrics listener. Deliberately a second port so it can be scraped
+  # in-cluster while staying off the public ingress.
+  metricsPort: 9090
+
+  # cs | en
+  defaultLang: cs
+  logLevel: info
+  # json for cluster log collectors, text for humans.
+  logFormat: json
+
+  # Refuse to start if the master keyring file is group- or world-readable.
+  # Turning this off means a bad Secret mount degrades silently instead of
+  # crash-looping. Leave it on.
+  strictStartup: true
+
+  # Must be comfortably below terminationGracePeriodSeconds so in-flight
+  # 50 MB downloads finish instead of being cut off mid-stream.
+  shutdownTimeout: 60s
+
+  enableFiles: true
+  # Emergency brake: serves existing secrets but refuses new writes. Useful
+  # when the volume is nearly full or during a key rotation.
+  readOnly: false
+  rateLimitEnabled: true
+
+  # -- Per-action allowances, "<per-hour>/<burst>" per client address.
+  # Leave an entry empty to keep the built-in default (shown in the comment).
+  #
+  # Worth raising for business customers: the limiter counts per address, and a
+  # whole office behind one NAT gateway is a single address. The defaults suit a
+  # public deployment where each visitor arrives from their own address.
+  #
+  # A malformed value is logged and ignored rather than fatal, so a typo here
+  # degrades to the default instead of refusing to start.
+  rateLimits:
+    createText: ""   # default 30/10
+    createFile: ""   # default 10/3
+    generate: ""     # default 30/10
+    peek: ""         # default 300/30
+    reveal: ""       # default 120/20
+    download: ""     # default 60/10
+    receipt: ""      # default 300/30
+    burn: ""         # default 60/10
+    page: ""         # default 600/60
+
+  # -- CIDRs whose X-Forwarded-For is trusted for client-IP attribution.
+  # Set this to your ingress controller's pod CIDR. If it is empty the
+  # per-IP quota buckets every request under the ingress pod's address, which
+  # means one abusive client exhausts the quota for everybody.
+  trustedProxies: []
+  # - 10.42.0.0/16
+
+  limits:
+    maxFileBytes: 52428800        # 50 MiB — keep in sync with ingress.proxyBodySize
+    maxTextInlineBytes: 102400    # 100 KiB stored inline in Redis
+    maxTextBytes: 1048576         # 1 MiB
+    dailyBytesPerIP: 524288000    # 500 MiB/day per client IP
+    totalStorageBytes: 21474836480 # 20 GiB — keep <= persistence.size
+    diskHighWatermarkPct: 85      # refuse new uploads above this fill level
+
+  ttl:
+    minDays: 1
+    maxDays: 30
+    defaultDays: 14
+    # How long the "it was opened" receipt outlives the secret.
+    receiptExtra: 168h
+    # Tombstones make a second visit say "already opened" instead of "never
+    # existed" — without them, a burned link is indistinguishable from a typo.
+    tombstone: 24h
+    downloadTicket: 5m
+    downloadAttempts: 3
+
+  # OWASP Argon2id minimum (19 MiB, t=2, p=1). concurrency caps how many
+  # derivations run at once; each one holds memoryKiB, so the worst-case
+  # footprint is memoryKiB * concurrency (~76 MiB at the defaults). Raise
+  # resources.limits.memory before raising either.
+  argon2:
+    memoryKiB: 19456
+    time: 2
+    parallelism: 1
+    concurrency: 4
+
+  passphrase:
+    windowFails: 5
+    window: 20m
+    totalFails: 20
+
+  jobs:
+    gcInterval: 1m
+    reconcileInterval: 6h
+    # How long an unreferenced blob must sit before GC removes it. Covers the
+    # window between writing a blob and committing its metadata.
+    orphanGrace: 1h
+
+  # -- Raw ONETIME_* passthrough for settings not modelled above.
+  extraEnv: {}
+  #   ONETIME_SOMETHING_NEW: "value"
+
+# ---------------------------------------------------------------------------
+# Master keyring
+# ---------------------------------------------------------------------------
+#
+# Format: "v2:<base64 of 32 raw bytes>,v1:<base64 of 32 raw bytes>"
+# Newest first; the first entry encrypts new secrets, the rest only decrypt.
+# Rotation = prepend a new id. NEVER remove an id that still has live secrets
+# under it, and never reuse an id for different bytes.
+#
+# Losing this keyring destroys every stored secret. It is not recoverable.
+masterKey:
+  # -- RECOMMENDED. Name of a Secret you manage yourself (SealedSecrets,
+  # External Secrets Operator, SOPS, vault-injector, `kubectl create secret`).
+  # The chart then never touches key material at all.
+  existingSecret: ""
+  existingSecretKey: master.keys
+
+  # -- Inline keyring. The chart creates the Secret. Convenient for CI, dev and
+  # `helm test`; in production it means the keyring lives in your values file
+  # and in Helm's release Secret in plaintext.
+  value: ""
+
+  # -- Generate a keyring on first install and keep it across upgrades.
+  #
+  # DANGEROUS BY DEFAULT-OFF, ON PURPOSE. The implementation uses `lookup`,
+  # which returns an empty result during `helm template` and during any
+  # server-side dry run. ArgoCD renders manifests with `helm template`, so with
+  # autoGenerate on, every single sync produces a *different* key and silently
+  # replaces the Secret. The pods restart fine; every previously stored secret
+  # becomes permanently undecryptable, and nothing logs an error until a user
+  # opens a link and gets "unknown key id".
+  #
+  # Only turn this on for a throwaway cluster driven by real `helm install`.
+  autoGenerate: false
+
+  # -- Copy the keyring into a memory-backed volume with mode 0400 before the
+  # app starts.
+  #
+  # This is NOT optional cosmetics. Kubernetes mounts Secret volumes as
+  # root:<fsGroup> and, whenever fsGroup is set, ORs group-read into the mode —
+  # so even `defaultMode: 0400` lands on disk as 0440. The app's startup check
+  # (`perm & 0o077 != 0`) rejects that and refuses to boot. The init container
+  # copies the file as uid 65532 and chmods it to 0400, which satisfies both
+  # kubelet and the app.
+  #
+  # Setting this to false requires config.strictStartup=false as well.
+  hardenPermissions: true
+
+  # Where the app reads the keyring from inside the container.
+  mountPath: /run/secrets/onetime
+  fileName: master.keys
+
+# ---------------------------------------------------------------------------
+# Redis / Valkey
+# ---------------------------------------------------------------------------
+redis:
+  # sidecar  — run Valkey next to the app in the same pod, sharing the PVC.
+  #            Lowest latency, no network hop, no credentials to manage,
+  #            and the data never leaves the pod's security boundary.
+  # external — point at an existing Redis. Set redis.external.url.
+  # none     — no Redis. Only useful for smoke-testing the HTTP surface;
+  #            /readyz will report not-ready.
+  mode: sidecar
+
+  image:
+    repository: valkey/valkey
+    tag: "8-alpine"
+    pullPolicy: IfNotPresent
+
+  # Keep this below resources.redis.limits.memory with headroom for the AOF
+  # rewrite buffer and Valkey's own overhead.
+  maxmemory: 192mb
+
+  # -- Extra directives appended to the rendered redis.conf.
+  extraConfig: []
+  # - "latency-monitor-threshold 100"
+
+  # Valkey ships redis-* compatibility symlinks, so redis-server and redis-cli
+  # both exist in the image. Override both of these if you swap in an image
+  # that does not (e.g. use valkey-server / valkey-cli).
+  command:
+    - redis-server
+    - /etc/redis/redis.conf
+
+  livenessProbeCommand:
+    - redis-cli
+    - -h
+    - 127.0.0.1
+    - -p
+    - "6379"
+    - ping
+
+  external:
+    # -- redis://[:password@]host:port/db or rediss:// for TLS.
+    url: ""
+    db: 0
+    # -- Secret holding the password, mounted as a file (never an env var).
+    existingPasswordSecret: ""
+    passwordKey: password
+
+# ---------------------------------------------------------------------------
+# Storage
+# ---------------------------------------------------------------------------
+persistence:
+  # With this off the chart uses an emptyDir: every restart loses every stored
+  # secret and blob. That is exactly what CI wants and never what production
+  # wants. It also flips the Deployment strategy to RollingUpdate.
+  enabled: true
+
+  # -- Use an existing PVC instead of creating one.
+  existingClaim: ""
+
+  storageClass: ""
+  # ReadWriteOnce is the only mode that makes sense at replicaCount 1, and it
+  # is what forces strategy: Recreate.
+  accessMode: ReadWriteOnce
+  size: 20Gi
+
+  annotations:
+    # Backing up a one-time secret store is an anti-feature. A restore would
+    # resurrect secrets that users were told are gone forever — including ones
+    # already read by their recipient. The durable thing here is the *promise*
+    # of deletion, not the bytes.
+    velero.io/exclude-from-backup: "true"
+
+  # helm.sh/resource-policy: keep on the PVC would strand volumes on uninstall.
+  # Left off deliberately: `helm uninstall` should take the data with it.
+  retain: false
+
+# ---------------------------------------------------------------------------
+# Networking
+# ---------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 8080
+  metricsPort: 9090
+  annotations: {}
+
+ingress:
+  enabled: true
+  className: nginx
+
+  # -- Public hostname. Should match the host part of config.baseURL.
+  host: onetime.fortion.cloud
+
+  # -- Additional hosts served by the same backend.
+  extraHosts: []
+
+  path: /
+  pathType: Prefix
+
+  tls:
+    enabled: true
+    # cert-manager ClusterIssuer. Set to "" if you provision the cert yourself.
+    clusterIssuer: letsencrypt-prod
+    # Defaults to "<fullname>-tls".
+    secretName: ""
+
+  # Must be >= config.limits.maxFileBytes plus multipart overhead, otherwise
+  # nginx rejects a legitimate 50 MiB upload with 413 before the app sees it.
+  proxyBodySize: 52m
+
+  # Long enough for a slow client to finish a 50 MiB download.
+  proxyReadTimeout: 300
+  proxySendTimeout: 300
+
+  # -- Extra annotations merged over the generated ones.
+  annotations: {}
+
+  # -- Replace the generated annotations entirely. Escape hatch for non-nginx
+  # controllers; you are then responsible for body size and buffering.
+  overrideAnnotations: {}
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+resources:
+  app:
+    requests:
+      cpu: 100m
+      # Floor is Argon2: memoryKiB * concurrency ~= 76 MiB of transient
+      # allocation on top of the runtime and streaming buffers.
+      memory: 256Mi
+    limits:
+      # No CPU limit on purpose. Argon2 is a deliberate CPU burn; a limit turns
+      # a burst of concurrent unlocks into throttling, which stretches request
+      # latency far past the point where the ingress gives up.
+      memory: 512Mi
+  redis:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  init:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 64Mi
+
+# ---------------------------------------------------------------------------
+# Scheduling and lifecycle
+# ---------------------------------------------------------------------------
+
+# Must exceed the slowest legitimate in-flight request. A 50 MiB download to a
+# phone on a bad connection can run for a minute; cutting it off on every
+# deploy produces truncated files with no error.
+terminationGracePeriodSeconds: 90
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+
+podDisruptionBudget:
+  # -- OFF BY DEFAULT, and that is the correct setting at replicaCount 1.
+  #
+  # With one replica, `minAvailable: 1` is a permanent block: `kubectl drain`
+  # can never evict the pod, so node maintenance hangs until someone deletes
+  # the PDB by hand. The only self-consistent alternative, `maxUnavailable: 1`,
+  # allows the eviction unconditionally — i.e. it is a no-op object.
+  #
+  # The template is kept for the day this chart grows real HA (RWX storage plus
+  # leader election on the GC loop), at which point minAvailable becomes
+  # meaningful.
+  enabled: false
+  maxUnavailable: 1
+  # minAvailable: 1   # only once replicaCount > 1
+
+networkPolicy:
+  # Recommended on. The app makes no outbound calls other than DNS: no
+  # webhooks, no telemetry, no object storage. A default-deny egress policy
+  # therefore costs nothing and removes the exfiltration path that an RCE or a
+  # malicious dependency would otherwise use.
+  enabled: true
+
+  # Namespace(s) the ingress controller runs in, allowed to reach port 8080.
+  ingressControllerNamespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: ingress-nginx
+
+  # Namespace(s) allowed to scrape port 9090.
+  monitoringNamespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: monitoring
+
+  # DNS resolution must stay open or nothing works. Adjust if CoreDNS lives
+  # elsewhere or is not labelled this way.
+  dnsNamespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: kube-system
+
+  # -- Extra egress rules. REQUIRED when redis.mode=external — otherwise the
+  # default-deny policy blocks the app from reaching your Redis.
+  extraEgress: []
+  # - to:
+  #     - namespaceSelector:
+  #         matchLabels:
+  #           kubernetes.io/metadata.name: redis
+  #     ports:
+  #       - port: 6379
+  #         protocol: TCP
+
+  # -- Extra ingress rules.
+  extraIngress: []
+
+# ---------------------------------------------------------------------------
+# Probes
+# ---------------------------------------------------------------------------
+#
+# /healthz is dependency-free: it answers as long as the process is alive.
+# /readyz checks Redis and the volume. Liveness must never point at /readyz —
+# a Redis blip would restart the app, which does not fix Redis and does drop
+# every in-flight upload.
+probes:
+  startup:
+    enabled: true
+    periodSeconds: 2
+    failureThreshold: 30   # up to 60s to come up before liveness takes over
+    timeoutSeconds: 2
+  liveness:
+    enabled: true
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+    successThreshold: 1
+
+# ---------------------------------------------------------------------------
+# Security context
+# ---------------------------------------------------------------------------
+#
+# 65532 is the `nonroot` user in gcr.io/distroless/static-debian12. fsGroup
+# MUST match it or the pod cannot write to its PersistentVolume — the failure
+# looks like a generic "permission denied" on first upload, long after the
+# deploy appeared to succeed.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  # Skip the recursive chown when the volume root already looks right. On a
+  # 20 GiB volume with many blobs, the "Always" default adds minutes to every
+  # single pod start.
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+# Size of the memory-backed /tmp. readOnlyRootFilesystem needs a writable /tmp,
+# and it is tmpfs rather than a disk volume on purpose: whatever transiently
+# lands there is plaintext, and plaintext must never survive a power loss.
+# Note this is distinct from ONETIME_TMP_DIR (/data/tmp), which lives on the
+# PVC because blob writes rename() from it into /data/blobs and rename cannot
+# cross filesystems.
+tmpDir:
+  sizeLimit: 64Mi
+
+# ---------------------------------------------------------------------------
+# Observability
+# ---------------------------------------------------------------------------
+serviceMonitor:
+  # Requires the Prometheus Operator CRDs.
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+  relabelings: []
+  metricRelabelings: []
+
+prometheusRule:
+  enabled: false
+  labels: {}
+  # Extra label attached to every rule, e.g. for Alertmanager routing.
+  additionalRuleLabels: {}
+  rules:
+    unknownKeyID:
+      enabled: true
+      severity: critical
+    bruteForce:
+      enabled: true
+      severity: warning
+      # Failed unlock attempts per minute, cluster-wide.
+      threshold: 5
+    volumeAlmostFull:
+      enabled: true
+      severity: warning
+      # Alert below this fraction of free space.
+      minFreeFraction: 0.15
+    redisDown:
+      enabled: true
+      severity: critical
+      for: 2m
+    secretsDropped:
+      enabled: true
+      severity: critical
+      # Fire when the active-secret count falls to this fraction of its value
+      # 5 minutes ago.
+      dropFraction: 0.5
+      # Ignore the noise when the absolute count is tiny.
+      minimumBaseline: 20
+
+# ---------------------------------------------------------------------------
+# Extras
+# ---------------------------------------------------------------------------
+# -- Extra volumes and mounts for the app container.
+extraVolumes: []
+extraVolumeMounts: []
+# -- Extra containers in the pod.
+extraContainers: []
+
+tests:
+  enabled: true
+  image:
+    repository: curlimages/curl
+    tag: "8.11.1"
+    pullPolicy: IfNotPresent

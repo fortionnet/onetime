@@ -1,0 +1,467 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "onetime Helm chart values",
+  "description": "Validated at template time by Helm. The constraints here are the ones that are cheaper to catch in `helm lint` than at 3am.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["replicaCount", "image", "config", "masterKey", "redis", "persistence", "service"],
+  "$defs": {
+    "rateLimit": {
+      "type": "string",
+      "pattern": "^$|^[1-9][0-9]*/[1-9][0-9]*$",
+      "description": "\"<per-hour>/<burst>\", both positive; empty keeps the default."
+    }
+  },
+  "properties": {
+    "global": {
+      "type": "object",
+      "description": "Reserved by Helm for parent charts."
+    },
+
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1,
+      "description": "Fixed at 1. The blob store is a ReadWriteOnce volume and the GC/reconcile loops assume a single writer; a second replica produces a Multi-Attach deadlock, not high availability."
+    },
+
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository"],
+      "properties": {
+        "registry": { "type": "string" },
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": {
+          "type": "string",
+          "pattern": "^$|^sha256:[a-f0-9]{64}$",
+          "description": "Immutable pin. Wins over tag."
+        },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+
+    "imagePullSecrets": { "type": "array", "items": { "type": "object" } },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+
+    "initImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string", "minLength": 1 },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "annotations": { "type": "object" },
+        "automountServiceAccountToken": {
+          "type": "boolean",
+          "description": "The app never calls the Kubernetes API; leave this false."
+        }
+      }
+    },
+
+    "podAnnotations": { "type": "object" },
+    "podLabels": { "type": "object" },
+
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseURL"],
+      "properties": {
+        "baseURL": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^https?://",
+          "description": "Public origin used to build one-time links. Use https:// in production: the secret id is in the URL path."
+        },
+        "listenPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "metricsPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "defaultLang": { "type": "string", "enum": ["cs", "en"] },
+        "logLevel": { "type": "string", "enum": ["debug", "info", "warn", "error"] },
+        "logFormat": { "type": "string", "enum": ["json", "text"] },
+        "strictStartup": { "type": "boolean" },
+        "shutdownTimeout": { "type": "string", "pattern": "^[0-9]+(ns|us|ms|s|m|h)$" },
+        "enableFiles": { "type": "boolean" },
+        "readOnly": { "type": "boolean" },
+        "rateLimitEnabled": { "type": "boolean" },
+        "rateLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-action allowances as \"<per-hour>/<burst>\". Empty keeps the built-in default.",
+          "properties": {
+            "createText": { "$ref": "#/$defs/rateLimit" },
+            "createFile": { "$ref": "#/$defs/rateLimit" },
+            "generate":   { "$ref": "#/$defs/rateLimit" },
+            "peek":       { "$ref": "#/$defs/rateLimit" },
+            "reveal":     { "$ref": "#/$defs/rateLimit" },
+            "download":   { "$ref": "#/$defs/rateLimit" },
+            "receipt":    { "$ref": "#/$defs/rateLimit" },
+            "burn":       { "$ref": "#/$defs/rateLimit" },
+            "page":       { "$ref": "#/$defs/rateLimit" }
+          }
+        },
+        "trustedProxies": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[0-9a-fA-F:.]+/[0-9]{1,3}$" },
+          "description": "CIDRs whose X-Forwarded-For is trusted. Empty means every request is attributed to the ingress pod."
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxFileBytes": { "type": "integer", "minimum": 1 },
+            "maxTextInlineBytes": { "type": "integer", "minimum": 1 },
+            "maxTextBytes": { "type": "integer", "minimum": 1 },
+            "dailyBytesPerIP": { "type": "integer", "minimum": 1 },
+            "totalStorageBytes": { "type": "integer", "minimum": 1 },
+            "diskHighWatermarkPct": { "type": "integer", "minimum": 1, "maximum": 100 }
+          }
+        },
+        "ttl": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "minDays": { "type": "integer", "minimum": 1 },
+            "maxDays": { "type": "integer", "minimum": 1 },
+            "defaultDays": { "type": "integer", "minimum": 1 },
+            "receiptExtra": { "type": "string", "pattern": "^[0-9]+(ns|us|ms|s|m|h)$" },
+            "tombstone": { "type": "string", "pattern": "^[0-9]+(ns|us|ms|s|m|h)$" },
+            "downloadTicket": { "type": "string", "pattern": "^[0-9]+(ns|us|ms|s|m|h)$" },
+            "downloadAttempts": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "argon2": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "memoryKiB": {
+              "type": "integer",
+              "minimum": 19456,
+              "description": "OWASP floor for Argon2id is 19456 KiB. Going below it is a downgrade of every passphrase in the system."
+            },
+            "time": { "type": "integer", "minimum": 2 },
+            "parallelism": { "type": "integer", "minimum": 1, "maximum": 255 },
+            "concurrency": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "passphrase": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "windowFails": { "type": "integer", "minimum": 1 },
+            "window": { "type": "string", "pattern": "^[0-9]+(ns|us|ms|s|m|h)$" },
+            "totalFails": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "jobs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "gcInterval": { "type": "string", "pattern": "^[0-9]+(ns|us|ms|s|m|h)$" },
+            "reconcileInterval": { "type": "string", "pattern": "^[0-9]+(ns|us|ms|s|m|h)$" },
+            "orphanGrace": { "type": "string", "pattern": "^[0-9]+(ns|us|ms|s|m|h)$" }
+          }
+        },
+        "extraEnv": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean"] },
+          "propertyNames": { "pattern": "^ONETIME_[A-Z0-9_]+$" }
+        }
+      }
+    },
+
+    "masterKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "existingSecret": { "type": "string" },
+        "existingSecretKey": { "type": "string", "minLength": 1 },
+        "value": {
+          "type": "string",
+          "pattern": "^$|^[A-Za-z0-9_.-]+:[A-Za-z0-9+/=]+(,[A-Za-z0-9_.-]+:[A-Za-z0-9+/=]+)*$",
+          "description": "Keyring: \"v2:<base64>,v1:<base64>\", newest first. The first entry encrypts new secrets; the rest only decrypt."
+        },
+        "autoGenerate": {
+          "type": "boolean",
+          "description": "DANGEROUS under GitOps. Uses `lookup`, which is empty during `helm template`, so ArgoCD regenerates the key on every sync and silently destroys every stored secret. See NOTES.txt."
+        },
+        "hardenPermissions": {
+          "type": "boolean",
+          "description": "Copy the keyring to a memory volume as mode 0400 via an init container. Required whenever config.strictStartup is true, because kubelet forces group-read onto Secret volumes when fsGroup is set."
+        },
+        "mountPath": { "type": "string", "pattern": "^/" },
+        "fileName": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "redis": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "type": "string", "enum": ["sidecar", "external", "none"] },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": { "type": "string", "minLength": 1 },
+            "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+          }
+        },
+        "maxmemory": { "type": "string", "pattern": "^[0-9]+(b|kb|mb|gb|k|m|g)?$" },
+        "extraConfig": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "not": { "pattern": "^\\s*(?i)maxmemory-policy\\b" },
+            "description": "maxmemory-policy cannot be overridden here. It must stay noeviction: any eviction policy silently deletes live secrets under memory pressure, with no error and no way to tell which ones went."
+          }
+        },
+        "command": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "livenessProbeCommand": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "external": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string", "pattern": "^$|^rediss?://" },
+            "db": { "type": "integer", "minimum": 0 },
+            "existingPasswordSecret": { "type": "string" },
+            "passwordKey": { "type": "string" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "external" } }, "required": ["mode"] },
+          "then": {
+            "properties": {
+              "external": {
+                "required": ["url"],
+                "properties": { "url": { "minLength": 1 } }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "existingClaim": { "type": "string" },
+        "storageClass": { "type": "string" },
+        "accessMode": {
+          "type": "string",
+          "enum": ["ReadWriteOnce", "ReadWriteOncePod"],
+          "description": "Only single-writer modes. RWX would imply multiple replicas, which the app does not support."
+        },
+        "size": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(E|P|T|G|M|K|Ei|Pi|Ti|Gi|Mi|Ki)?$" },
+        "annotations": { "type": "object" },
+        "retain": { "type": "boolean" }
+      }
+    },
+
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "metricsPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "annotations": { "type": "object" }
+      }
+    },
+
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "host": { "type": "string" },
+        "extraHosts": { "type": "array", "items": { "type": "string" } },
+        "path": { "type": "string" },
+        "pathType": { "type": "string", "enum": ["Prefix", "Exact", "ImplementationSpecific"] },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "clusterIssuer": { "type": "string" },
+            "secretName": { "type": "string" }
+          }
+        },
+        "proxyBodySize": {
+          "type": "string",
+          "pattern": "^[0-9]+[kKmMgG]?$",
+          "description": "Must exceed config.limits.maxFileBytes plus multipart overhead, or nginx 413s a legitimate upload before the app sees it."
+        },
+        "proxyReadTimeout": { "type": "integer", "minimum": 1 },
+        "proxySendTimeout": { "type": "integer", "minimum": 1 },
+        "annotations": { "type": "object" },
+        "overrideAnnotations": { "type": "object" }
+      },
+      "if": { "properties": { "enabled": { "const": true } }, "required": ["enabled"] },
+      "then": { "required": ["host"], "properties": { "host": { "minLength": 1 } } }
+    },
+
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "app": { "type": "object" },
+        "redis": { "type": "object" },
+        "init": { "type": "object" }
+      }
+    },
+
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 30,
+      "description": "Must outlast an in-flight 50 MiB transfer to a slow client, and must exceed config.shutdownTimeout."
+    },
+
+    "nodeSelector": { "type": "object" },
+    "tolerations": { "type": "array", "items": { "type": "object" } },
+    "affinity": { "type": "object" },
+    "topologySpreadConstraints": { "type": "array", "items": { "type": "object" } },
+    "priorityClassName": { "type": "string" },
+
+    "podDisruptionBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "maxUnavailable": { "type": ["integer", "string"] },
+        "minAvailable": {
+          "type": ["integer", "string"],
+          "description": "Do not use at replicaCount 1: it permanently blocks `kubectl drain`."
+        }
+      }
+    },
+
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "ingressControllerNamespaceSelector": { "type": "object" },
+        "monitoringNamespaceSelector": { "type": "object" },
+        "dnsNamespaceSelector": { "type": "object" },
+        "extraEgress": { "type": "array", "items": { "type": "object" } },
+        "extraIngress": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+
+    "probes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "startup": { "type": "object" },
+        "liveness": { "type": "object" },
+        "readiness": { "type": "object" }
+      }
+    },
+
+    "podSecurityContext": {
+      "type": "object",
+      "properties": {
+        "runAsNonRoot": { "const": true },
+        "runAsUser": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Must match the UID baked into the image (65532 in distroless nonroot)."
+        },
+        "fsGroup": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Must match runAsUser, or the pod cannot write to its PersistentVolume."
+        }
+      }
+    },
+
+    "containerSecurityContext": {
+      "type": "object",
+      "properties": {
+        "allowPrivilegeEscalation": { "const": false },
+        "readOnlyRootFilesystem": { "const": true },
+        "runAsNonRoot": { "const": true }
+      }
+    },
+
+    "tmpDir": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sizeLimit": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(E|P|T|G|M|K|Ei|Pi|Ti|Gi|Mi|Ki)?$" }
+      }
+    },
+
+    "serviceMonitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "interval": { "type": "string" },
+        "scrapeTimeout": { "type": "string" },
+        "labels": { "type": "object" },
+        "relabelings": { "type": "array" },
+        "metricRelabelings": { "type": "array" }
+      }
+    },
+
+    "prometheusRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "labels": { "type": "object" },
+        "additionalRuleLabels": { "type": "object" },
+        "rules": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "unknownKeyID": { "type": "object" },
+            "bruteForce": { "type": "object" },
+            "volumeAlmostFull": { "type": "object" },
+            "redisDown": { "type": "object" },
+            "secretsDropped": { "type": "object" }
+          }
+        }
+      }
+    },
+
+    "extraVolumes": { "type": "array", "items": { "type": "object" } },
+    "extraVolumeMounts": { "type": "array", "items": { "type": "object" } },
+    "extraContainers": { "type": "array", "items": { "type": "object" } },
+
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string" },
+            "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+          }
+        }
+      }
+    }
+  }
+}

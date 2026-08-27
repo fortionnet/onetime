@@ -1,0 +1,51 @@
+# Keep the build context small and — more importantly — keep secrets and local
+# state from ever reaching the daemon. Everything here is either irrelevant to
+# `go build` or actively dangerous to ship.
+
+.git
+.gitignore
+.github
+.golangci.yml
+
+# Deployment artefacts: not needed to compile the binary.
+deploy
+docker-compose.yml
+docker-compose.*.yml
+Dockerfile
+.dockerignore
+Makefile
+
+# Docs and planning notes.
+# docs/ is a Go package, not just prose: llms.txt and openapi.json are embedded
+# into the binary and served at runtime, so the build needs it.
+docs/*.md
+*.md
+!README.md
+.context
+
+# Local build output.
+/onetime
+dist/
+bin/
+coverage.out
+coverage.html
+*.test
+*.prof
+
+# Secrets and local config. A stray master.keys in the context would end up in
+# the image layer cache even if the Dockerfile never COPYs it explicitly.
+.env
+.env.*
+*.key
+*.keys
+*.pem
+*.p12
+secrets/
+.data/
+data/
+
+# Editor and OS noise.
+.idea/
+.vscode/
+.DS_Store
+*.swp

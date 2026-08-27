@@ -1,0 +1,40 @@
+{{- include "onetime.validate" . -}}
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "onetime.pvcName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "onetime.labels" . | nindent 4 }}
+  annotations:
+    {{- with .Values.persistence.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- if .Values.persistence.retain }}
+    helm.sh/resource-policy: keep
+    {{- end }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+  {{- if .Values.persistence.storageClass }}
+  {{- if eq .Values.persistence.storageClass "-" }}
+  storageClassName: ""
+  {{- else }}
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  {{- end }}
+  {{- end }}
+{{/*
+One claim, shared by the app and the Redis sidecar through subPath:
+
+  <volume root>/app     -> app container at /data       (blobs + tmp)
+  <volume root>/redis   -> redis sidecar at /data/redis  (AOF)
+
+Two claims would double the storage bill and, worse, make the two halves
+independently restorable - you could end up with metadata that points at blobs
+that are gone, or blobs whose "already opened" tombstones vanished.
+*/}}
+{{- end }}

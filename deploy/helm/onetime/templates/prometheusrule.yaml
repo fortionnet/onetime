@@ -1,0 +1,132 @@
+{{- include "onetime.validate" . -}}
+{{- if .Values.prometheusRule.enabled -}}
+{{- $ns := .Release.Namespace -}}
+{{- $svc := include "onetime.fullname" . -}}
+{{- $pvc := include "onetime.pvcName" . -}}
+{{- $r := .Values.prometheusRule.rules -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "onetime.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "onetime.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: onetime.rules
+      rules:
+{{- if $r.unknownKeyID.enabled }}
+        # The loudest alert in this file. A decrypt that fails because the key
+        # id is not in the keyring means the active keyring no longer contains
+        # a key that live secrets were encrypted under - almost always because
+        # a rotation dropped an old id, or because autoGenerate replaced the
+        # Secret under an ArgoCD sync.
+        #
+        # Every one of these is a permanently unreadable secret. The threshold
+        # is "> 0" on purpose: there is no acceptable rate, and the window to
+        # restore the old key material closes as soon as it is overwritten.
+        - alert: OnetimeUnknownKeyID
+          expr: increase(onetime_decrypt_failures_total{namespace="{{ $ns }}",reason="unknown_key_id"}[5m]) > 0
+          for: 0m
+          labels:
+            severity: {{ $r.unknownKeyID.severity }}
+            {{- with $.Values.prometheusRule.additionalRuleLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "onetime cannot decrypt stored secrets (unknown key id)"
+            description: >-
+              {{ `{{ $value | printf "%.0f" }}` }} decrypt attempts in the last 5 minutes referenced a key id
+              that is not in the current keyring. Those secrets are unreadable and will stay that way.
+              STOP the rollout and restore the previous master keyring Secret before anything overwrites it.
+            runbook_url: https://github.com/fortionnet/onetime/blob/main/docs/runbook.md#unknown-key-id
+{{- end }}
+{{- if $r.bruteForce.enabled }}
+        # Sustained failed unlock attempts. Argon2 makes each guess expensive,
+        # so a high rate is either an attack or a broken client retry loop -
+        # and both are worth a human look, because the same requests are also
+        # burning the CPU budget every legitimate user shares.
+        - alert: OnetimePassphraseBruteForce
+          expr: sum(rate(onetime_lookup_total{namespace="{{ $ns }}",result="bad_key"}[5m])) * 60 > {{ $r.bruteForce.threshold }}
+          for: 5m
+          labels:
+            severity: {{ $r.bruteForce.severity }}
+            {{- with $.Values.prometheusRule.additionalRuleLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "onetime: sustained failed passphrase attempts"
+            description: >-
+              {{ `{{ $value | printf "%.1f" }}` }} failed unlock attempts per minute over the last 5 minutes
+              (threshold {{ $r.bruteForce.threshold }}/min). Check ONETIME_TRUSTED_PROXIES is set correctly -
+              if it is not, per-IP limits are all being charged to the ingress pod and are not protecting anyone.
+{{- end }}
+{{- if and $r.volumeAlmostFull.enabled $.Values.persistence.enabled }}
+        # The app itself refuses uploads at ONETIME_DISK_HIGH_WATERMARK_PCT
+        # (85%), so this fires slightly before users start seeing failures.
+        # There is no eviction to fall back on: blobs stay until their TTL.
+        - alert: OnetimeVolumeAlmostFull
+          expr: >-
+            kubelet_volume_stats_available_bytes{namespace="{{ $ns }}",persistentvolumeclaim="{{ $pvc }}"}
+            /
+            kubelet_volume_stats_capacity_bytes{namespace="{{ $ns }}",persistentvolumeclaim="{{ $pvc }}"}
+            < {{ $r.volumeAlmostFull.minFreeFraction }}
+          for: 15m
+          labels:
+            severity: {{ $r.volumeAlmostFull.severity }}
+            {{- with $.Values.prometheusRule.additionalRuleLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "onetime data volume is running out of space"
+            description: >-
+              Only {{ `{{ $value | humanizePercentage }}` }} free on {{ $pvc }}. New uploads start failing at the
+              disk high-watermark. Expand the PVC, or lower ONETIME_TTL_MAX_DAYS so blobs age out sooner.
+{{- end }}
+{{- if $r.redisDown.enabled }}
+        # Redis holds all secret metadata. Without it the app can serve pages
+        # but cannot resolve, create or burn a single link, so it correctly
+        # reports itself not-ready and the ingress stops sending traffic.
+        - alert: OnetimeRedisDown
+          expr: onetime_redis_up{namespace="{{ $ns }}"} == 0
+          for: {{ $r.redisDown.for }}
+          labels:
+            severity: {{ $r.redisDown.severity }}
+            {{- with $.Values.prometheusRule.additionalRuleLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "onetime cannot reach Redis"
+            description: >-
+              onetime_redis_up has been 0 for {{ $r.redisDown.for }}. The service is not ready and is serving
+              nothing. If Redis is the sidecar, check whether it hit maxmemory - with maxmemory-policy
+              noeviction, writes fail rather than silently deleting live secrets.
+{{- end }}
+{{- if $r.secretsDropped.enabled }}
+        # A cliff in the active-secret count is the signature of mass deletion:
+        # a GC bug, a wiped volume, an accidental FLUSHDB, or a restore from a
+        # stale snapshot. Normal expiry is gradual, so a 50% drop inside five
+        # minutes is never routine. The baseline guard keeps this quiet on a
+        # freshly installed or lightly used instance.
+        - alert: OnetimeSecretsDropped
+          expr: >-
+            onetime_secrets_active{namespace="{{ $ns }}"}
+            < {{ $r.secretsDropped.dropFraction }} * (onetime_secrets_active{namespace="{{ $ns }}"} offset 5m)
+            and (onetime_secrets_active{namespace="{{ $ns }}"} offset 5m) > {{ $r.secretsDropped.minimumBaseline }}
+          for: 2m
+          labels:
+            severity: {{ $r.secretsDropped.severity }}
+            {{- with $.Values.prometheusRule.additionalRuleLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "onetime lost a large fraction of its active secrets"
+            description: >-
+              Active secrets fell to {{ `{{ $value | printf "%.0f" }}` }}, below
+              {{ $r.secretsDropped.dropFraction }}x the count from 5 minutes ago. Expiry is gradual; a cliff
+              means bulk deletion. Check the GC loop, the Redis AOF and whether the PVC was replaced.
+{{- end }}
+{{- end }}

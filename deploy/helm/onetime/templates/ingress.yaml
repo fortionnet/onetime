@@ -1,0 +1,88 @@
+{{- include "onetime.validate" . -}}
+{{- if .Values.ingress.enabled -}}
+{{- $fullName := include "onetime.fullname" . -}}
+{{- $svcPort := .Values.service.port -}}
+{{- $tlsSecret := .Values.ingress.tls.secretName | default (printf "%s-tls" $fullName) -}}
+{{- $hosts := prepend .Values.ingress.extraHosts .Values.ingress.host -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "onetime.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.overrideAnnotations }}
+    {{- toYaml .Values.ingress.overrideAnnotations | nindent 4 }}
+    {{- else }}
+    # Must be >= ONETIME_MAX_FILE_BYTES plus multipart framing, or nginx
+    # answers 413 before the request ever reaches the app and the user sees a
+    # generic browser error with no explanation.
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingress.proxyBodySize | quote }}
+
+    # SECURITY control, not a performance tweak.
+    #
+    # With buffering on (the nginx default) the controller spools the entire
+    # request body to /var/lib/nginx/body on the ingress pod before forwarding
+    # it. For this service that means up to 50 MiB of user plaintext written to
+    # a disk the app does not control, is not encrypted by, and never cleans
+    # up. Streaming straight through keeps plaintext off that host entirely.
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+
+    # A 50 MiB download to a slow mobile connection is a legitimately long
+    # response. The nginx default of 60s would cut it off mid-file.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.proxyReadTimeout | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.proxySendTimeout | quote }}
+
+    {{- if .Values.ingress.tls.enabled }}
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    {{- if .Values.ingress.tls.clusterIssuer }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | quote }}
+    {{- end }}
+    {{- end }}
+
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      # The one-time link IS the credential: it travels in the URL path. Without
+      # this, every outbound link a recipient clicks from the secret page hands
+      # the full secret URL to a third party in the Referer header.
+      more_set_headers "Referrer-Policy: no-referrer";
+      # Secret URLs must never end up in a search index or an archive crawl.
+      more_set_headers "X-Robots-Tag: noindex, nofollow, noarchive, nosnippet";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "Cross-Origin-Opener-Policy: same-origin";
+      # Nothing here is ever safe to cache: a cached secret page is a second read.
+      more_set_headers "Cache-Control: no-store, no-cache, must-revalidate, private";
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        {{- range $hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ $tlsSecret }}
+  {{- end }}
+  rules:
+    {{- range $hosts }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: {{ $.Values.ingress.path }}
+            pathType: {{ $.Values.ingress.pathType }}
+            backend:
+              service:
+                name: {{ $fullName }}
+                # Port 8080 only. The metrics port is deliberately unreachable
+                # from outside the cluster.
+                port:
+                  number: {{ $svcPort }}
+    {{- end }}
+{{- end }}

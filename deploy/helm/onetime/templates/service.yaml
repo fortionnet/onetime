@@ -1,0 +1,29 @@
+{{- include "onetime.validate" . -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "onetime.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "onetime.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+    # Metrics are on the Service so the Prometheus Operator can scrape them
+    # through a named port. The Ingress below routes ONLY to `http` - exposing
+    # /metrics publicly would leak secret counts, upload volumes and failure
+    # rates, which is a usage-pattern oracle over a privacy product.
+    - name: metrics
+      port: {{ .Values.service.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "onetime.selectorLabels" . | nindent 4 }}

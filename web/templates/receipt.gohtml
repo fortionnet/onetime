@@ -1,0 +1,118 @@
+{{template "base" .}}
+
+{{- /* receipt.gohtml — the sender's receipt.
+
+       Like the gate, the server cannot read this record: the key is in the
+       fragment, so the page is a shell that POSTs to /api/v1/receipt. States
+       are rendered up front and toggled by JS. */ -}}
+{{define "receipt-content" -}}
+
+<div class="wrap receipt">
+  <p class="kicker">{{call .T "receipt.kicker"}}</p>
+  <h2 id="receipt-h2">{{call .T "receipt.title"}}</h2>
+
+  <p class="lead mt-4" id="receipt-loading">{{call .T "receipt.loading"}}</p>
+
+  <div class="card mt-5 is-hidden" id="receipt-card">
+
+    <div id="receipt-body">
+      <div class="state" id="state-block">
+        <span class="state__dot" id="state-icon"></span>
+        <div>
+          <h3 class="state__title" id="state-title"></h3>
+          <p class="state__sub" id="state-sub"></p>
+        </div>
+      </div>
+
+      <hr class="hairline">
+
+      {{- /* Timestamps arrive as RFC 3339 in UTC and are formatted in the
+             browser, which is the only place that knows the reader's zone. */}}
+      <dl class="dl" aria-label="{{call .T "receipt.dl.aria"}}">
+        <dt>{{call .T "receipt.dl.created"}}</dt>
+        <dd id="dd-created">—</dd>
+        <dt>{{call .T "receipt.dl.expires"}}</dt>
+        <dd id="dd-expires">—</dd>
+        <dt>{{call .T "receipt.dl.content"}}</dt>
+        <dd id="dd-content">—</dd>
+        <dt>{{call .T "receipt.dl.peeked"}}</dt>
+        <dd id="dd-peeked">—</dd>
+        <dt>{{call .T "receipt.dl.consumed"}}</dt>
+        <dd id="dd-consumed">—</dd>
+      </dl>
+
+      {{- /* Only reachable while the link is still unread. */}}
+      <div id="burn" class="is-hidden">
+        <hr class="hairline">
+        <h3 class="state__title">{{call .T "receipt.burn.h3"}}</h3>
+        <div class="btn-row mt-4">
+          <button type="button" class="btn btn--danger-ghost" id="burn-start">
+            {{call .T "receipt.burn.cta"}} <span class="btn__arrow" aria-hidden="true">→</span>
+          </button>
+        </div>
+        <p class="burn__hint">{{call .T "receipt.burn.hint"}}</p>
+      </div>
+    </div>
+
+    {{- /* Two-step confirmation in place of the card's content, not a
+           window.confirm: a native dialog is unstyleable, unlabelled and on
+           mobile it is dismissed by the same tap that opened it. Focus lands
+           on "Back", because that is the safer of the two. */}}
+    <div id="burn-confirm" class="is-hidden" role="group"
+         aria-labelledby="burn-confirm-title">
+      <h3 class="state__title" id="burn-confirm-title">{{call .T "receipt.burn.confirm.h3"}}</h3>
+      <p class="state__sub mt-3">{{call .T "receipt.burn.confirm.body"}}</p>
+      <div class="btn-row mt-5">
+        <button type="button" class="btn btn--danger" id="burn-yes">
+          <span id="burn-yes-label">{{call .T "receipt.burn.confirm.yes"}}</span>
+          <span class="btn__arrow" aria-hidden="true">→</span>
+        </button>
+        <button type="button" class="btn btn--ghost" id="burn-no">{{call .T "receipt.burn.confirm.no"}}</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="receipt-status" class="is-hidden mt-5">
+    <div class="callout callout--danger">
+      {{template "icon-warning" "callout__icon"}}
+      <span id="receipt-status-text"></span>
+    </div>
+  </div>
+
+  <p class="hint mt-6">
+    {{template "icon-bookmark" "chip__icon"}} {{call .T "receipt.bookmark"}}
+  </p>
+  <p class="hint">{{call .T "receipt.privacy"}}</p>
+
+  {{- /* State wording, rendered by Go and picked up by JS. */}}
+  <div id="state-catalog" class="is-hidden" aria-hidden="true">
+    <div data-state="new">
+      <span data-title>{{call .T "receipt.state.new.title"}}</span>
+      <span data-sub>{{call .T "receipt.state.new.sub"}}</span>
+      <span data-icon>{{template "icon-dot" ""}}</span>
+    </div>
+    <div data-state="consumed">
+      <span data-title>{{call .T "receipt.state.consumed.title"}}</span>
+      <span data-sub>{{call .T "receipt.state.consumed.sub"}}</span>
+      <span data-icon>{{template "icon-check" ""}}</span>
+    </div>
+    <div data-state="burned">
+      <span data-title>{{call .T "receipt.state.burned.title"}}</span>
+      <span data-sub>{{call .T "receipt.state.burned.sub"}}</span>
+      <span data-icon>{{template "icon-ban" ""}}</span>
+    </div>
+    <div data-state="destroyed">
+      <span data-title>{{call .T "receipt.state.destroyed.title"}}</span>
+      <span data-sub>{{call .T "receipt.state.destroyed.sub"}}</span>
+      <span data-icon>{{template "icon-lock" ""}}</span>
+    </div>
+    <div data-state="expired">
+      <span data-title>{{call .T "receipt.state.expired.title"}}</span>
+      <span data-sub>{{call .T "receipt.state.expired.sub"}}</span>
+      <span data-icon>{{template "icon-clock" ""}}</span>
+    </div>
+  </div>
+</div>
+
+{{- end}}

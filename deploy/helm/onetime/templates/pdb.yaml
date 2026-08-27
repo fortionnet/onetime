@@ -1,0 +1,32 @@
+{{- include "onetime.validate" . -}}
+{{- if .Values.podDisruptionBudget.enabled -}}
+{{/*
+Disabled by default, and that is the right default at replicaCount 1.
+
+  minAvailable: 1    -> the only pod can never be evicted. `kubectl drain` on
+                        its node blocks forever, node autoscaling and OS
+                        patching stall, and the fix is "delete the PDB by hand".
+  maxUnavailable: 1  -> the eviction is always allowed. Correct, but it is a
+                        no-op object that only looks like protection.
+
+Neither buys anything today. The template stays so that the day this chart
+grows real HA - RWX storage plus leader election on the GC and reconcile loops
+- turning it on is a one-line change rather than an archaeology exercise.
+*/}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "onetime.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "onetime.labels" . | nindent 4 }}
+spec:
+  {{- if hasKey .Values.podDisruptionBudget "minAvailable" }}
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "onetime.selectorLabels" . | nindent 6 }}
+{{- end }}

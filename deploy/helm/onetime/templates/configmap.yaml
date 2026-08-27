@@ -1,0 +1,24 @@
+{{- include "onetime.validate" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "onetime.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "onetime.labels" . | nindent 4 }}
+data:
+  {{- include "onetime.env" . | nindent 2 }}
+{{- if eq .Values.redis.mode "sidecar" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "onetime.fullname" . }}-redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "onetime.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+data:
+  redis.conf: |-
+    {{- include "onetime.redisConf" . | nindent 4 }}
+{{- end }}

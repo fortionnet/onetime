@@ -1,0 +1,27 @@
+# Patterns to ignore when packaging the chart.
+.DS_Store
+.git/
+.gitignore
+.bzr/
+.hg/
+.hgignore
+.svn/
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+.project
+.idea/
+.vscode/
+# CI scratch space and rendered output.
+ci/
+*.tgz
+# Local override files must never be baked into the package: they routinely
+# contain a real masterKey.value.
+values-local.yaml
+values-*.local.yaml
+secrets.yaml
+# Environment-specific deployment config, not part of the reusable chart.
+values-production.yaml
+values-staging.yaml

@@ -1,0 +1,106 @@
+# golangci-lint v2 configuration.
+# Run with: golangci-lint run   (or `make lint`)
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  # Start from the default set (errcheck, govet, ineffassign, staticcheck,
+  # unused) and add the ones that matter for a service that handles secrets.
+  default: standard
+  enable:
+    # Hard-coded credentials, weak crypto, unhandled file permissions, path
+    # traversal in blob handling — the whole point of this service.
+    - gosec
+    # A leaked response body is a leaked connection; on a file-download path
+    # that is a slow resource exhaustion bug.
+    - bodyclose
+    # Every outbound call must be cancellable, otherwise a hung dependency
+    # outlives the request and blocks graceful shutdown.
+    - noctx
+    - revive
+    - errorlint
+    - copyloopvar
+    - misspell
+    - unconvert
+    - nilerr
+    - rowserrcheck
+    - sqlclosecheck
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+      exclude-functions:
+        # Deferred Close on a read-only handle has nothing actionable to report.
+        - (io.Closer).Close
+    govet:
+      enable-all: true
+      disable:
+        # Struct field alignment is not worth the readability cost here.
+        - fieldalignment
+    gosec:
+      excludes:
+        # G104 duplicates errcheck.
+        - G104
+      config:
+        # 50 MiB uploads are streamed to disk with explicit limits, so the
+        # decompression-bomb heuristic needs the real ceiling, not the default.
+        G110: "52428800"
+    staticcheck:
+      checks:
+        - all
+    revive:
+      rules:
+        - name: exported
+          arguments: [checkPrivateReceivers, disableStutteringCheck]
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: indent-error-flow
+        - name: var-naming
+        - name: unreachable-code
+        - name: superfluous-else
+        - name: time-naming
+        - name: errorf
+        - name: unexported-return
+        - name: blank-imports
+        - name: range
+        - name: receiver-naming
+        - name: increment-decrement
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # Tests legitimately use weak randomness, fixed keys and unchecked errors
+      # in table setup; enforcing production rules there is pure noise.
+      - path: _test\.go$
+        linters:
+          - gosec
+          - errcheck
+          - noctx
+          - bodyclose
+      # Embedded template/static asset registration.
+      - path: (^|/)embed\.go$
+        linters:
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/fortionnet/onetime
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

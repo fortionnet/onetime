@@ -1,0 +1,111 @@
+{{- if .Values.tests.enabled -}}
+{{/*
+`helm test` smoke check. Deliberately narrow: it proves the pod is up, the
+listener answers, and — via /readyz — that Redis and the data volume are
+actually reachable from inside the container.
+
+That last part is what catches the expensive misconfigurations before users do:
+an fsGroup that does not match the image's UID, a subPath the app cannot write
+to, a Recreate/RollingUpdate mismatch that left the pod wedged on Multi-Attach,
+or a keyring the app refused because the file mode came out group-readable.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "onetime.fullname" . }}-test-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "onetime.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    # Only replaced on the next run, never deleted on success. `helm test
+    # --logs` fetches the pod's output *after* the hook finishes, so deleting a
+    # passing pod makes a successful test report a failure it cannot explain.
+    helm.sh/hook-delete-policy: before-hook-creation
+    helm.sh/hook-weight: "1"
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: api
+      image: "{{ .Values.tests.image.repository }}:{{ .Values.tests.image.tag }}"
+      imagePullPolicy: {{ .Values.tests.image.pullPolicy }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -eu
+          BASE="http://{{ include "onetime.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}"
+
+          echo "--> GET ${BASE}/healthz"
+          code=$(curl -sS -o /tmp/healthz.out -w '%{http_code}' --max-time 10 "${BASE}/healthz")
+          echo "    HTTP ${code}"
+          cat /tmp/healthz.out || true
+          echo
+          [ "${code}" = "200" ] || { echo "FAIL: /healthz returned ${code}, want 200"; exit 1; }
+
+          echo "--> GET ${BASE}/readyz"
+          # /readyz exercises Redis and the data volume. If this fails while
+          # /healthz passes, the process is alive but a dependency is not:
+          # check the Redis sidecar and whether the app can write to /data.
+          code=$(curl -sS -o /tmp/readyz.out -w '%{http_code}' --max-time 10 "${BASE}/readyz")
+          echo "    HTTP ${code}"
+          cat /tmp/readyz.out || true
+          echo
+          {{- if eq .Values.redis.mode "none" }}
+          # redis.mode=none has no metadata store, so not-ready is the correct
+          # answer here and the test only asserts that the endpoint responds.
+          case "${code}" in
+            200|503) ;;
+            *) echo "FAIL: /readyz returned ${code}"; exit 1 ;;
+          esac
+          {{- else }}
+          [ "${code}" = "200" ] || { echo "FAIL: /readyz returned ${code}, want 200"; exit 1; }
+          {{- end }}
+
+          echo "--> GET ${BASE}/version"
+          curl -sS --max-time 10 "${BASE}/version" || true
+          echo
+
+          echo "--> GET ${BASE}/ (UI must render)"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "${BASE}/")
+          echo "    HTTP ${code}"
+          [ "${code}" = "200" ] || { echo "FAIL: / returned ${code}, want 200"; exit 1; }
+
+          echo "--> metrics must NOT be served on the public port"
+          # /metrics lives on 9090. If it answers on 8080 it is one Ingress
+          # rule away from being public, and it leaks secret counts and upload
+          # volumes — a usage oracle over a privacy product.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "${BASE}/metrics")
+          echo "    HTTP ${code}"
+          [ "${code}" != "200" ] || { echo "FAIL: /metrics is exposed on the HTTP port"; exit 1; }
+
+          echo "ALL CHECKS PASSED"
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 64Mi
+  volumes:
+    - name: tmp
+      emptyDir:
+        medium: Memory
+        sizeLimit: 8Mi
+{{- end }}

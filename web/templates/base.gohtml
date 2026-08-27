@@ -1,0 +1,240 @@
+{{- /*
+base.gohtml — document shell shared by every page.
+
+Each page file is executed by name ("create.gohtml", "gate.gohtml", …). Its
+body is a single {{template "base" .}} call; the page's own markup lives in a
+{{define "<page>-content"}} block that "base" dispatches to below. All files are
+parsed into one template set, so block names have to be unique per page — hence
+the "-content" suffix rather than a shared "content" name.
+
+Data keys consumed here (all supplied by the handler):
+  Lang T Title BaseURL Version Page AltLangURL CSS JS
+  MaxFileBytes MaxTextBytes TTLMin TTLMax TTLDefault FilesEnabled ReadOnly
+  I18nJSON  — must be template.JS(i18n.JSONFor(Lang)); html/template treats
+              <script type="application/json"> as a JS context, so a plain
+              string would be re-encoded as a quoted JS string literal.
+  SecretID  (gate) / ReceiptID (receipt) / Variant, Message (status)
+*/ -}}
+{{define "base" -}}
+<!doctype html>
+<html lang="{{.Lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>{{.Title}}</title>
+<meta name="description" content="{{call .T "footer.tagline"}}">
+{{- if or (eq .Page "gate") (eq .Page "receipt") (eq .Page "status")}}
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+{{- end}}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="{{.CSS}}">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+</head>
+<body class="page-{{.Page}}" data-page="{{.Page}}" data-base-url="{{.BaseURL}}"
+      data-max-file-bytes="{{.MaxFileBytes}}" data-max-text-bytes="{{.MaxTextBytes}}"
+      data-ttl-min="{{.TTLMin}}" data-ttl-max="{{.TTLMax}}" data-ttl-default="{{.TTLDefault}}"
+      {{if .ReadOnly}}data-read-only="1"{{end}}{{if not .FilesEnabled}} data-files-disabled="1"{{end}}
+      {{- if .SecretID}} data-secret-id="{{.SecretID}}"{{end}}
+      {{- if .ReceiptID}} data-receipt-id="{{.ReceiptID}}"{{end}}>
+
+<a class="skip" href="#main">{{call .T "a11y.skip"}}</a>
+
+{{template "site-header" .}}
+
+<main id="main" class="main" tabindex="-1">
+{{- if eq .Page "create"}}{{template "create-content" .}}
+{{- else if eq .Page "gate"}}{{template "gate-content" .}}
+{{- else if eq .Page "receipt"}}{{template "receipt-content" .}}
+{{- else if eq .Page "status"}}{{template "status-content" .}}
+{{- else if eq .Page "api"}}{{template "api-content" .}}
+{{- else if eq .Page "privacy"}}{{template "privacy-content" .}}
+{{- end}}
+</main>
+
+{{template "site-footer" .}}
+
+{{- /* Two permanent live regions. Announcements are routed here by JS so that
+       nothing has to be wrapped in a live region just to be announced — which
+       matters on the gate page, where the secret itself must never be read out
+       automatically. */}}
+<div id="sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="sr-alert" class="sr-only" role="alert" aria-live="assertive" aria-atomic="true"></div>
+
+{{- /* The policy is script-src 'self' 'nonce-…' with no 'unsafe-inline', so
+       the inline payload needs the request nonce. The module script would pass
+       on 'self' alone, but carrying the nonce keeps the two consistent. */}}
+<script type="application/json" id="i18n" nonce="{{.Nonce}}">{{.I18nJSON}}</script>
+<script type="module" src="{{.JS}}" nonce="{{.Nonce}}"></script>
+</body>
+</html>
+{{- end}}
+
+
+{{- /* ---------------------------------------------------------------- */ -}}
+{{- /* Header. The gate page deliberately has no navigation: the recipient
+       has exactly one decision to make and every other link is a way to
+       lose the content. */ -}}
+{{define "site-header" -}}
+<header class="site-header">
+  <div class="wrap site-header__inner">
+    {{- /* Two separate destinations, so neither is a trap: the logo is the
+           company, the suffix is this service. The company link opens in a new
+           tab on purpose — on the result screen and on a revealed secret the
+           current tab holds something that cannot be fetched again, and a
+           same-tab navigation would destroy it. */}}
+    <div class="brand">
+      <a class="brand__logo" href="https://fortion.cz" target="_blank" rel="noopener"
+         aria-label="{{call .T "site.brand_aria"}}">
+        {{- /* alt="" on purpose: the link already carries the accessible name,
+               and a named image inside it would be announced twice. */}}
+        <img class="brand__mark" src="{{asset "img/fortion-blue.svg"}}" alt=""
+             width="501" height="189" decoding="async">
+      </a>
+      <a class="brand__suffix" href="/{{.Lang}}/" aria-label="{{call .T "site.home_aria"}}">{{call .T "site.name"}}</a>
+    </div>
+
+    {{- if ne .Page "gate"}}
+    <nav class="nav" aria-label="{{call .T "nav.aria"}}">
+      <a class="nav__link" href="/{{.Lang}}/#how"{{if eq .Page "create"}} aria-current="page"{{end}}>{{call .T "nav.how"}}</a>
+      <a class="nav__link" href="/{{.Lang}}/api"{{if eq .Page "api"}} aria-current="page"{{end}}>{{call .T "nav.api"}}</a>
+    </nav>
+    {{- end}}
+
+    {{template "lang-switch" .}}
+  </div>
+</header>
+{{- end}}
+
+
+{{- /* Two plain links, no dropdown and no flags: a flag is a country, not a
+       language, and a dropdown hides the fact that a choice exists. */ -}}
+{{define "lang-switch" -}}
+<div class="lang">
+  {{- if eq .Lang "cs"}}
+  <span class="lang__item" aria-current="true">{{call .T "lang.cs"}}</span>
+  <span class="lang__sep" aria-hidden="true">│</span>
+  <a class="lang__item" href="{{.AltLangURL}}" hreflang="en" lang="en" rel="alternate"
+     aria-label="{{call .T "lang.switch_aria"}}">{{call .T "lang.en"}}</a>
+  {{- else}}
+  <a class="lang__item" href="{{.AltLangURL}}" hreflang="cs" lang="cs" rel="alternate"
+     aria-label="{{call .T "lang.switch_aria"}}">{{call .T "lang.cs"}}</a>
+  <span class="lang__sep" aria-hidden="true">│</span>
+  <span class="lang__item" aria-current="true">{{call .T "lang.en"}}</span>
+  {{- end}}
+</div>
+{{- end}}
+
+
+{{- /* The gate page gets no footer at all: the recipient has exactly one
+       decision to make, and every extra link is a way to lose the content. */ -}}
+{{define "site-footer" -}}
+{{- if ne .Page "gate"}}
+<footer class="site-footer">
+  <div class="wrap site-footer__inner">
+    <p class="site-footer__legal">{{call .T "footer.operator"}}<span class="site-footer__sep" aria-hidden="true">·</span>{{call .T "footer.company"}}</p>
+    <nav class="site-footer__links" aria-label="{{call .T "footer.nav_aria"}}">
+      <a href="/{{.Lang}}/privacy">{{call .T "footer.privacy"}}</a>
+      <span class="site-footer__sep" aria-hidden="true">·</span>
+      <a href="/{{.Lang}}/api">{{call .T "footer.api"}}</a>
+    </nav>
+  </div>
+</footer>
+{{- end}}
+{{- end}}
+
+
+{{- /* ---------------------------------------------------------------- */ -}}
+{{- /* Icon set. Every icon takes a class string as its dot so the caller can
+       size it: {{template "icon-lock" "chip__icon"}} — pass "" for none. */ -}}
+
+{{define "icon-lock" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="10.5" width="17" height="11" rx="2.5"></rect><path d="M7.5 10.5V7a4.5 4.5 0 0 1 9 0v3.5"></path></svg>
+{{- end}}
+
+{{define "icon-check" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="20 6.5 9.5 17.5 4 12"></polyline></svg>
+{{- end}}
+
+{{define "icon-clock" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"></circle><polyline points="12 6.8 12 12 15.4 14"></polyline></svg>
+{{- end}}
+
+{{define "icon-question" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"></circle><path d="M9.2 9.2a2.9 2.9 0 0 1 5.7.8c0 1.9-2.9 2.4-2.9 4"></path><line x1="12" y1="17.4" x2="12" y2="17.5"></line></svg>
+{{- end}}
+
+{{define "icon-ban" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"></circle><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"></line></svg>
+{{- end}}
+
+{{define "icon-warning" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.2 2.6 20h18.8L12 3.2Z"></path><line x1="12" y1="9.5" x2="12" y2="13.8"></line><line x1="12" y1="16.8" x2="12" y2="16.9"></line></svg>
+{{- end}}
+
+{{define "icon-bolt" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polygon points="13 2.5 4.5 13.6 11 13.6 10.5 21.5 19.5 10.4 13 10.4"></polygon></svg>
+{{- end}}
+
+{{define "icon-pause" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"></circle><line x1="9.8" y1="8.6" x2="9.8" y2="15.4"></line><line x1="14.2" y1="8.6" x2="14.2" y2="15.4"></line></svg>
+{{- end}}
+
+{{define "icon-tools" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.8 6.3a5.5 5.5 0 0 1-7.3 6.7L6 20.5 3.5 18l7.5-7.5a5.5 5.5 0 0 1 6.7-7.3l-3.3 3.3 2.1 2.1 3.3-3.3Z"></path></svg>
+{{- end}}
+
+{{define "icon-key" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="8.5" cy="15.5" r="4"></circle><line x1="11.4" y1="12.6" x2="20.5" y2="3.5"></line><line x1="17.2" y1="6.8" x2="19.6" y2="9.2"></line></svg>
+{{- end}}
+
+{{define "icon-file" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 3H7.5A2.5 2.5 0 0 0 5 5.5v13A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V8l-5-5Z"></path><polyline points="14 3 14 8 19 8"></polyline></svg>
+{{- end}}
+
+{{define "icon-text" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="4.5" y1="7" x2="19.5" y2="7"></line><line x1="4.5" y1="12" x2="19.5" y2="12"></line><line x1="4.5" y1="17" x2="13" y2="17"></line></svg>
+{{- end}}
+
+{{define "icon-close" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="6.5" y1="6.5" x2="17.5" y2="17.5"></line><line x1="17.5" y1="6.5" x2="6.5" y2="17.5"></line></svg>
+{{- end}}
+
+{{define "icon-eye" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+{{- end}}
+
+{{define "icon-eye-off" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="3.5" y1="3.5" x2="20.5" y2="20.5"></line><path d="M10.2 5.8A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3 3.9"></path><path d="M6.4 7.6A16.4 16.4 0 0 0 2.5 12S6 18.5 12 18.5a9.4 9.4 0 0 0 3.9-.8"></path><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"></path></svg>
+{{- end}}
+
+{{define "icon-chevron" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="9.5 5.5 16 12 9.5 18.5"></polyline></svg>
+{{- end}}
+
+{{define "icon-copy" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="12.5" height="12.5" rx="2.5"></rect><path d="M5.5 15h-.5A2.5 2.5 0 0 1 2.5 12.5V5A2.5 2.5 0 0 1 5 2.5h7.5A2.5 2.5 0 0 1 15 5v.5"></path></svg>
+{{- end}}
+
+{{define "icon-download" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 15.5v3A2.5 2.5 0 0 1 18.5 21h-13A2.5 2.5 0 0 1 3 18.5v-3"></path><polyline points="7.5 10.5 12 15 16.5 10.5"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+{{- end}}
+
+{{define "icon-upload" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 15.5v3A2.5 2.5 0 0 1 18.5 21h-13A2.5 2.5 0 0 1 3 18.5v-3"></path><polyline points="7.5 7.5 12 3 16.5 7.5"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+{{- end}}
+
+{{define "icon-bookmark" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18.5 21 12 16.3 5.5 21V5.5A2.5 2.5 0 0 1 8 3h8a2.5 2.5 0 0 1 2.5 2.5V21Z"></path></svg>
+{{- end}}
+
+{{define "icon-dot" -}}
+<svg class="icon icon--solid {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="5"></circle></svg>
+{{- end}}
+
+{{define "icon-info" -}}
+<svg class="icon {{.}}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"></circle><line x1="12" y1="11" x2="12" y2="16.5"></line><line x1="12" y1="7.6" x2="12" y2="7.7"></line></svg>
+{{- end}}

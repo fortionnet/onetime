@@ -1,0 +1,56 @@
+{{template "base" .}}
+
+{{- /* privacy.gohtml — two columns, because "what we don't keep" is only
+       credible next to "what we do". */ -}}
+{{define "privacy-content" -}}
+
+<div class="wrap page-pad">
+  <p class="kicker">{{call .T "privacy.kicker"}}</p>
+  <h1>{{call .T "privacy.h1"}}</h1>
+  <p class="lead mt-5 prose">{{call .T "privacy.lead"}}</p>
+
+  <div class="two-col">
+    <div class="card ledger ledger--no">
+      <h3>{{call .T "privacy.not.title"}}</h3>
+      <ul>
+        <li>{{template "icon-close" "ledger__icon"}}<span>{{call .T "privacy.not.1"}}</span></li>
+        <li>{{template "icon-close" "ledger__icon"}}<span>{{call .T "privacy.not.2"}}</span></li>
+        <li>{{template "icon-close" "ledger__icon"}}<span>{{call .T "privacy.not.3"}}</span></li>
+        <li>{{template "icon-close" "ledger__icon"}}<span>{{call .T "privacy.not.4"}}</span></li>
+      </ul>
+    </div>
+
+    <div class="card ledger ledger--yes">
+      <h3>{{call .T "privacy.yes.title"}}</h3>
+      <ul>
+        <li>{{template "icon-check" "ledger__icon"}}<span>{{call .T "privacy.yes.1"}}</span></li>
+        <li>{{template "icon-check" "ledger__icon"}}<span>{{call .T "privacy.yes.2"}}</span></li>
+        <li>{{template "icon-check" "ledger__icon"}}<span>{{call .T "privacy.yes.3"}}</span></li>
+        <li>{{template "icon-check" "ledger__icon"}}<span>{{call .T "privacy.yes.4"}}</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <details class="details mt-6">
+    <summary class="details__summary">
+      {{template "icon-chevron" "details__chevron"}}
+      <span>{{call .T "privacy.tech.summary"}}</span>
+    </summary>
+    <div class="details__body prose stack">
+      <p>{{call .T "privacy.tech.1"}}</p>
+      <p>{{call .T "privacy.tech.2"}}</p>
+      <p>{{call .T "privacy.tech.3"}}</p>
+      <p>{{call .T "privacy.tech.4"}}</p>
+    </div>
+  </details>
+
+  <section class="mt-6 prose">
+    <h3>{{call .T "privacy.operator.title"}}</h3>
+    <p class="mt-3">{{call .T "privacy.operator.body"}}</p>
+    <p class="hint">{{call .T "privacy.operator.addr"}}</p>
+    <p class="hint">{{call .T "privacy.operator.ico"}}</p>
+    <p class="hint mt-4">{{call .T "privacy.updated"}}</p>
+  </section>
+</div>
+
+{{- end}}

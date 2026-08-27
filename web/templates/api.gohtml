@@ -1,0 +1,231 @@
+{{template "base" .}}
+
+{{- /* api.gohtml — one long page, because API docs are read with ctrl-F.
+       The table of contents is sticky on desktop and becomes a row of pills on
+       narrow screens. */ -}}
+{{define "api-content" -}}
+
+<section class="navy doc-band">
+  <div class="wrap">
+    <p class="kicker">{{call .T "api.kicker"}}</p>
+    <h1>{{call .T "api.h1.pre"}}<span class="mark-hl">{{call .T "api.h1.mark"}}</span>{{call .T "api.h1.post"}}</h1>
+    <p class="lead">{{call .T "api.lead"}}</p>
+    <div class="btn-row">
+      <a class="btn btn--ghost" href="/llms.txt">{{call .T "api.btn.llms"}}
+        <span class="btn__arrow" aria-hidden="true">→</span></a>
+      <a class="btn btn--ghost" href="/api/v1/openapi.json">{{call .T "api.btn.openapi"}}
+        <span class="btn__arrow" aria-hidden="true">→</span></a>
+    </div>
+  </div>
+</section>
+
+<div class="wrap doc-layout">
+
+  <nav class="toc" aria-label="{{call .T "api.toc_aria"}}">
+    <p class="toc__title">{{call .T "api.toc.title"}}</p>
+    <ol>
+      <li><a href="#quickstart">{{call .T "api.s.quickstart.title"}}</a></li>
+      <li><a href="#create">{{call .T "api.s.create.title"}}</a></li>
+      <li><a href="#file">{{call .T "api.s.file.title"}}</a></li>
+      <li><a href="#generate">{{call .T "api.s.generate.title"}}</a></li>
+      <li><a href="#reveal">{{call .T "api.s.reveal.title"}}</a></li>
+      <li><a href="#receipt">{{call .T "api.s.receipt.title"}}</a></li>
+      <li><a href="#burn">{{call .T "api.s.burn.title"}}</a></li>
+      <li><a href="#errors">{{call .T "api.s.errors.title"}}</a></li>
+      <li><a href="#limits">{{call .T "api.s.limits.title"}}</a></li>
+      <li><a href="#agents">{{call .T "api.s.agents.title"}}</a></li>
+    </ol>
+  </nav>
+
+  <div>
+
+    <section class="doc-section" id="quickstart">
+      <h2>{{call .T "api.s.quickstart.title"}}</h2>
+      <p>{{call .T "api.s.quickstart.body"}}</p>
+      <div class="code" data-copy>
+<pre>curl -s https://onetime.fortion.cloud/api/v1/secret \
+  -H <span class="tok-str">'content-type: application/json'</span> \
+  -d <span class="tok-str">'{"secret":"hunter2","ttl_days":7}'</span></pre>
+      </div>
+      <div class="callout callout--info mt-4">
+        {{template "icon-info" "callout__icon"}}
+        <span>{{call .T "api.s.quickstart.note"}}</span>
+      </div>
+    </section>
+
+    <section class="doc-section" id="create">
+      <h2>{{call .T "api.s.create.title"}}</h2>
+      <p class="endpoint"><span class="endpoint__verb">POST</span> /api/v1/secret</p>
+      <p>{{call .T "api.s.create.body"}}</p>
+      <div class="code" data-copy>
+<pre>{
+  <span class="tok-key">"secret"</span>: <span class="tok-str">"hunter2"</span>,
+  <span class="tok-key">"ttl_days"</span>: 14,
+  <span class="tok-key">"passphrase"</span>: <span class="tok-str">""</span>
+}
+
+<span class="tok-com">// 201 Created</span>
+{
+  <span class="tok-key">"secret_url"</span>: <span class="tok-str">"https://onetime.fortion.cloud/s/7Kq2…#Xf9…"</span>,
+  <span class="tok-key">"receipt_url"</span>: <span class="tok-str">"https://onetime.fortion.cloud/m/3Bd1…#Qa2…"</span>,
+  <span class="tok-key">"kind"</span>: <span class="tok-str">"text"</span>,
+  <span class="tok-key">"size"</span>: 7,
+  <span class="tok-key">"has_passphrase"</span>: false,
+  <span class="tok-key">"expires_at"</span>: <span class="tok-str">"2026-09-09T12:00:00Z"</span>,
+  <span class="tok-key">"receipt_expires_at"</span>: <span class="tok-str">"2026-09-16T12:00:00Z"</span>,
+  <span class="tok-key">"ttl_days"</span>: 14
+}</pre>
+      </div>
+    </section>
+
+    <section class="doc-section" id="file">
+      <h2>{{call .T "api.s.file.title"}}</h2>
+      <p class="endpoint"><span class="endpoint__verb">POST</span> /api/v1/secret/file</p>
+      <p>{{call .T "api.s.file.body"}}</p>
+      <div class="code" data-copy>
+<pre>curl -s https://onetime.fortion.cloud/api/v1/secret/file \
+  -F <span class="tok-str">'ttl_days=7'</span> \
+  -F <span class="tok-str">'passphrase='</span> \
+  -F <span class="tok-str">'file=@report.pdf'</span>   <span class="tok-com"># must be the last field</span></pre>
+      </div>
+    </section>
+
+    <section class="doc-section" id="generate">
+      <h2>{{call .T "api.s.generate.title"}}</h2>
+      <p class="endpoint"><span class="endpoint__verb">POST</span> /api/v1/generate</p>
+      <p>{{call .T "api.s.generate.body"}}</p>
+      <div class="code" data-copy>
+<pre>{
+  <span class="tok-key">"length"</span>: 24,
+  <span class="tok-key">"alphabet"</span>: <span class="tok-str">"symbols"</span>,
+  <span class="tok-key">"ttl_days"</span>: 14,
+  <span class="tok-key">"return_value"</span>: false
+}
+
+<span class="tok-com">// 201 Created — "value" stays null unless return_value is true</span>
+{ <span class="tok-key">"secret_url"</span>: <span class="tok-str">"…"</span>, <span class="tok-key">"receipt_url"</span>: <span class="tok-str">"…"</span>, <span class="tok-key">"value"</span>: null }</pre>
+      </div>
+    </section>
+
+    <section class="doc-section" id="reveal">
+      <h2>{{call .T "api.s.reveal.title"}}</h2>
+      <p class="endpoint"><span class="endpoint__verb">POST</span> /api/v1/peek</p>
+      <p class="endpoint"><span class="endpoint__verb">POST</span> /api/v1/reveal</p>
+      <p class="endpoint"><span class="endpoint__verb endpoint__verb--get">GET</span> /api/v1/download</p>
+      <p>{{call .T "api.s.reveal.body"}}</p>
+      <div class="code" data-copy>
+<pre><span class="tok-com">// the key is the part of the link after the #</span>
+POST /api/v1/peek     { <span class="tok-key">"key"</span>: <span class="tok-str">"Xf9…"</span> }
+<span class="tok-com">// 200</span> { <span class="tok-key">"kind"</span>: <span class="tok-str">"text"</span>, <span class="tok-key">"state"</span>: <span class="tok-str">"new"</span>, <span class="tok-key">"has_passphrase"</span>: false, <span class="tok-key">"size"</span>: 7 }
+
+POST /api/v1/reveal   { <span class="tok-key">"key"</span>: <span class="tok-str">"Xf9…"</span>, <span class="tok-key">"confirm"</span>: true }
+<span class="tok-com">// 200</span> { <span class="tok-key">"kind"</span>: <span class="tok-str">"text"</span>, <span class="tok-key">"value"</span>: <span class="tok-str">"hunter2"</span>, <span class="tok-key">"revealed_at"</span>: <span class="tok-str">"…"</span> }
+
+<span class="tok-com">// files answer with a ticket instead of a body</span>
+<span class="tok-com">// 200</span> { <span class="tok-key">"download_url"</span>: <span class="tok-str">"/api/v1/download"</span>, <span class="tok-key">"download_ticket"</span>: <span class="tok-str">"…"</span>, <span class="tok-key">"ticket_expires_in"</span>: 300 }
+GET /api/v1/download
+X-Onetime-Ticket: <span class="tok-str">"…"</span></pre>
+      </div>
+    </section>
+
+    <section class="doc-section" id="receipt">
+      <h2>{{call .T "api.s.receipt.title"}}</h2>
+      <p class="endpoint"><span class="endpoint__verb">POST</span> /api/v1/receipt</p>
+      <p>{{call .T "api.s.receipt.body"}}</p>
+      <div class="code" data-copy>
+<pre>{ <span class="tok-key">"key"</span>: <span class="tok-str">"Qa2…"</span> }
+
+<span class="tok-com">// 200 — state is new | consumed | burned | destroyed | expired</span>
+{
+  <span class="tok-key">"state"</span>: <span class="tok-str">"new"</span>,
+  <span class="tok-key">"kind"</span>: <span class="tok-str">"text"</span>,
+  <span class="tok-key">"size"</span>: 7,
+  <span class="tok-key">"has_passphrase"</span>: false,
+  <span class="tok-key">"created_at"</span>: <span class="tok-str">"2026-08-26T12:00:00Z"</span>,
+  <span class="tok-key">"secret_expires_at"</span>: <span class="tok-str">"2026-09-09T12:00:00Z"</span>,
+  <span class="tok-key">"peeked_at"</span>: null,
+  <span class="tok-key">"consumed_at"</span>: null,
+  <span class="tok-key">"passphrase_failures"</span>: 0,
+  <span class="tok-key">"receipt_expires_at"</span>: <span class="tok-str">"2026-09-16T12:00:00Z"</span>
+}</pre>
+      </div>
+    </section>
+
+    <section class="doc-section" id="burn">
+      <h2>{{call .T "api.s.burn.title"}}</h2>
+      <p class="endpoint"><span class="endpoint__verb">POST</span> /api/v1/receipt/burn</p>
+      <p>{{call .T "api.s.burn.body"}}</p>
+      <div class="code" data-copy>
+<pre>{ <span class="tok-key">"key"</span>: <span class="tok-str">"Qa2…"</span>, <span class="tok-key">"confirm"</span>: true }</pre>
+      </div>
+    </section>
+
+    <section class="doc-section" id="errors">
+      <h2>{{call .T "api.s.errors.title"}}</h2>
+      <p>{{call .T "api.s.errors.body"}}</p>
+      <div class="code" data-copy>
+<pre><span class="tok-com">// 410 Gone — content-type: application/problem+json</span>
+{
+  <span class="tok-key">"code"</span>: <span class="tok-str">"already_revealed"</span>,
+  <span class="tok-key">"title"</span>: <span class="tok-str">"Already revealed"</span>,
+  <span class="tok-key">"detail"</span>: <span class="tok-str">"This link has already been used."</span>
+}</pre>
+      </div>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>{{call .T "api.s.errors.col_code"}}</th>
+            <th>{{call .T "api.s.errors.col_http"}}</th>
+            <th>{{call .T "api.s.errors.col_desc"}}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>not_found</td><td>404</td><td>{{call .T "js.err.not_found"}}</td></tr>
+          <tr><td>already_revealed</td><td>409, 410</td><td>{{call .T "js.err.already_revealed"}}</td></tr>
+          <tr><td>burned</td><td>410</td><td>{{call .T "js.err.burned"}}</td></tr>
+          <tr><td>destroyed</td><td>410</td><td>{{call .T "js.err.destroyed"}}</td></tr>
+          <tr><td>passphrase_required</td><td>401</td><td>{{call .T "js.err.passphrase_required"}}</td></tr>
+          <tr><td>bad_passphrase</td><td>403</td><td>{{call .T "js.err.bad_passphrase"}}</td></tr>
+          <tr><td>too_many_attempts</td><td>429</td><td>{{call .T "js.err.too_many_attempts"}}</td></tr>
+          <tr><td>confirmation_required</td><td>400</td><td>{{call .T "js.err.confirmation_required"}}</td></tr>
+          <tr><td>payload_too_large</td><td>413</td><td>{{call .T "js.err.payload_too_large"}}</td></tr>
+          <tr><td>empty</td><td>400</td><td>{{call .T "js.err.empty"}}</td></tr>
+          <tr><td>storage_full</td><td>507</td><td>{{call .T "js.err.storage_full"}}</td></tr>
+          <tr><td>files_disabled</td><td>403</td><td>{{call .T "js.err.files_disabled"}}</td></tr>
+          <tr><td>read_only</td><td>503</td><td>{{call .T "js.err.read_only"}}</td></tr>
+          <tr><td>quota_exceeded</td><td>429</td><td>{{call .T "js.err.quota_exceeded"}}</td></tr>
+          <tr><td>ticket_expired</td><td>410</td><td>{{call .T "js.err.ticket_expired"}}</td></tr>
+          <tr><td>invalid_ttl</td><td>400</td><td>{{call .T "js.err.invalid_ttl"}}</td></tr>
+          <tr><td>rate_limited</td><td>429</td><td>{{call .T "js.err.rate_limited"}}</td></tr>
+          <tr><td>internal</td><td>500</td><td>{{call .T "js.err.internal"}}</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="doc-section" id="limits">
+      <h2>{{call .T "api.s.limits.title"}}</h2>
+      <p>{{call .T "api.s.limits.body"}}</p>
+    </section>
+
+    <section class="doc-section" id="agents">
+      <h2>{{call .T "api.s.agents.title"}}</h2>
+      <p>{{call .T "api.s.agents.body"}}</p>
+      <div class="code" data-copy>
+<pre>curl -s https://onetime.fortion.cloud/api/v1/generate \
+  -H <span class="tok-str">'content-type: application/json'</span> \
+  -d <span class="tok-str">'{"length":24,"alphabet":"symbols","return_value":false}'</span> \
+  | jq -r <span class="tok-str">'.secret_url'</span>
+<span class="tok-com"># the generated password never passes through the agent</span></pre>
+      </div>
+      <p class="mt-4">{{call .T "api.s.agents.llms"}}</p>
+
+      <div class="callout callout--warning mt-5">
+        {{template "icon-info" "callout__icon"}}
+        <span><strong>{{call .T "api.note.title"}}</strong> — {{call .T "api.note.body"}}</span>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+{{- end}}

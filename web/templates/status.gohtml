@@ -1,0 +1,70 @@
+{{template "base" .}}
+
+{{- /* status.gohtml — the shared dead-end page.
+
+       One icon, one heading, one sentence, one way out. Nothing here is ever a
+       surprise the reader can act on except creating their own link, so there
+       is exactly one call to action. */ -}}
+{{define "status-content" -}}
+
+{{- /* Unknown variants degrade to server_error rather than rendering a raw
+       catalog key into the page. */ -}}
+{{- $v := "server_error" -}}
+{{- if or (eq .Variant "already_read") (eq .Variant "expired") (eq .Variant "not_found")
+          (eq .Variant "burned") (eq .Variant "destroyed") (eq .Variant "missing_key")
+          (eq .Variant "server_error") (eq .Variant "rate_limited") (eq .Variant "read_only")
+          (eq .Variant "preview")}}
+  {{- $v = .Variant -}}
+{{- end -}}
+
+{{- $tone := "muted" -}}
+{{- if or (eq $v "expired") (eq $v "missing_key") (eq $v "rate_limited") (eq $v "read_only")}}
+  {{- $tone = "warning" -}}
+{{- else if or (eq $v "destroyed") (eq $v "server_error")}}
+  {{- $tone = "danger" -}}
+{{- end -}}
+
+<div class="status wrap">
+  <div class="status__inner">
+
+    {{- /* Colour is never the only carrier: every variant has its own glyph
+           and its own words as well. */}}
+    <span class="status__icon status__icon--{{$tone}}">
+      {{- if eq $v "already_read"}}{{template "icon-check" ""}}
+      {{- else if eq $v "expired"}}{{template "icon-clock" ""}}
+      {{- else if eq $v "not_found"}}{{template "icon-question" ""}}
+      {{- else if eq $v "burned"}}{{template "icon-ban" ""}}
+      {{- else if eq $v "destroyed"}}{{template "icon-lock" ""}}
+      {{- else if eq $v "missing_key"}}{{template "icon-warning" ""}}
+      {{- else if eq $v "rate_limited"}}{{template "icon-pause" ""}}
+      {{- else if eq $v "read_only"}}{{template "icon-tools" ""}}
+      {{- else if eq $v "preview"}}{{template "icon-lock" ""}}
+      {{- else}}{{template "icon-bolt" ""}}
+      {{- end}}
+    </span>
+
+    <h2>{{call .T (printf "status.%s.title" $v)}}</h2>
+    <p class="lead status__body">{{call .T (printf "status.%s.body" $v)}}</p>
+
+    {{- if .Message}}
+    <p class="status__detail">{{.Message}}</p>
+    {{- end}}
+
+    {{- if eq $v "already_read"}}
+    {{- /* Claiming perfect prefetch protection here would be a lie, and the
+           reader is exactly the person who needs the truth. */}}
+    <details class="disclosure mt-5">
+      <summary>{{template "icon-chevron" "details__chevron"}}{{call .T "status.already_read.why"}}</summary>
+      <p class="disclosure__body">{{call .T "status.already_read.why_body"}}</p>
+    </details>
+    {{- end}}
+
+    <p class="status__cta">
+      <a class="btn btn--primary" href="/">{{call .T "status.cta"}}
+        <span class="btn__arrow" aria-hidden="true">→</span></a>
+    </p>
+
+  </div>
+</div>
+
+{{- end}}

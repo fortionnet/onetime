@@ -1,0 +1,460 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Deny by default, then grant the minimum per job. A workflow-level
+# `contents: read` would hand every job in this file read access to the repo
+# token, including the ones that only need to run `helm lint`.
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned tool versions. Floating versions turn an upstream release into a
+  # red build on an unrelated PR.
+  GOLANGCI_LINT_VERSION: v2.13.1
+  GOVULNCHECK_VERSION: v1.1.4
+  GITLEAKS_VERSION: 8.30.1
+  KUBECONFORM_VERSION: 0.8.0
+  HELM_VERSION: v3.18.4
+  KUBERNETES_VERSION: "1.31.0"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job never pushes. Leaving the token in .git/config would make
+          # it available to every dependency that shells out to git.
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -s -l .)
+          if [ -n "$out" ]; then
+            echo "::error::gofmt -s would reformat these files:"
+            echo "$out"
+            echo "$out" | sed 's/^/  /' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "gofmt clean"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: --timeout=5m
+
+      - name: go mod tidy is clean
+        run: |
+          go mod tidy
+          if ! git diff --quiet -- go.mod go.sum; then
+            echo "::error::go.mod/go.sum are not tidy; run 'go mod tidy'"
+            git diff -- go.mod go.sum
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # -race catches the data races that a single-replica service still has
+      # plenty of (GC loop vs. request handlers over the same blob metadata).
+      # -shuffle=on catches tests that only pass because of ordering.
+      - name: go test
+        run: |
+          go test -race -shuffle=on -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          {
+            echo "## Coverage"
+            echo
+            echo '```'
+            go tool cover -func=coverage.out | tail -n 25
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # govulncheck is reachability-based: it only reports advisories whose
+      # vulnerable symbols this code actually calls, so a finding here is
+      # almost always real work rather than dependency noise.
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  # ---------------------------------------------------------------------------
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: a key committed three months ago and "removed" in the
+          # next commit is still a leaked key, and still in the pack file.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The released binary rather than gitleaks-action, which requires a paid
+      # GITLEAKS_LICENSE for organisation-owned repositories.
+      - name: Install gitleaks
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      # The config adds a rule for the master keyring format specifically, and
+      # allowlists the handful of publicly documented dev/CI keyrings by exact
+      # value — so a real key leaking into the same file is still caught.
+      - name: Scan history
+        run: gitleaks git --config .github/gitleaks.toml --no-banner --redact --verbose --exit-code 1 .
+
+      - name: Scan working tree
+        run: gitleaks dir --config .github/gitleaks.toml --no-banner --redact --verbose --exit-code 1 .
+
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      # Single-arch and no push: this is a "does it compile and does it scan
+      # clean" gate. The multi-arch cross-build happens in release.yml.
+      - name: Build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: onetime:ci
+          build-args: |
+            VERSION=ci-${{ github.sha }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=1970-01-01T00:00:00Z
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Filesystem scan finds vulnerable Go modules in go.sum. Image scan finds
+      # anything the base layer drags in. Distroless static should be close to
+      # empty, and if it ever is not, that is exactly what we want to hear.
+      - name: Trivy — filesystem
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Trivy — image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: onetime:ci
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Upload SARIF — filesystem
+        if: always()
+        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+      - name: Upload SARIF — image
+        if: always()
+        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+
+      # Handed to the smoke job so the image is built exactly once.
+      - name: Export image
+        run: docker save onetime:ci -o /tmp/onetime-ci.tar
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-ci
+          path: /tmp/onetime-ci.tar
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  helm:
+    name: Helm
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # The three shapes that actually differ structurally. The first must
+        # render Recreate; the third must render RollingUpdate.
+        values:
+          - default-values.yaml
+          - external-redis-values.yaml
+          - no-persistence-values.yaml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kubeconform
+        run: |
+          curl -sSfL -o /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform
+          kubeconform -v
+
+      - name: helm lint --strict
+        run: |
+          helm lint deploy/helm/onetime --strict \
+            --values "deploy/helm/onetime/ci/${{ matrix.values }}"
+
+      - name: helm template
+        run: |
+          helm template onetime deploy/helm/onetime \
+            --namespace onetime \
+            --values "deploy/helm/onetime/ci/${{ matrix.values }}" \
+            > rendered.yaml
+          echo "rendered $(grep -c '^kind:' rendered.yaml) objects"
+
+      - name: kubeconform
+        run: |
+          # -strict rejects unknown fields, which is what catches a typo'd
+          # securityContext key that Kubernetes would otherwise ignore in
+          # silence. ServiceMonitor/PrometheusRule schemas come from the CRD
+          # catalogue; anything still missing is skipped rather than failed.
+          kubeconform \
+            -strict \
+            -summary \
+            -kubernetes-version "${KUBERNETES_VERSION}" \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            -ignore-missing-schemas \
+            rendered.yaml
+
+      # Structural assertions the schema cannot express. These are the two
+      # mistakes that only surface in a real cluster, hours later.
+      - name: Assert deployment strategy matches storage mode
+        run: |
+          strategy=$(grep -A1 '^  strategy:' rendered.yaml | grep 'type:' | awk '{print $2}')
+          echo "strategy=$strategy for ${{ matrix.values }}"
+          case "${{ matrix.values }}" in
+            no-persistence-values.yaml)
+              [ "$strategy" = "RollingUpdate" ] || {
+                echo "::error::expected RollingUpdate without persistence, got $strategy"; exit 1; }
+              ;;
+            *)
+              # RollingUpdate over a ReadWriteOnce PVC deadlocks on Multi-Attach.
+              [ "$strategy" = "Recreate" ] || {
+                echo "::error::expected Recreate with a ReadWriteOnce PVC, got $strategy"; exit 1; }
+              ;;
+          esac
+
+      - name: Assert fsGroup matches the image UID
+        run: |
+          # 65532 is `nonroot` in gcr.io/distroless/static-debian12. A mismatch
+          # deploys cleanly and then fails on the first upload with a bare
+          # "permission denied".
+          for field in runAsUser runAsGroup fsGroup; do
+            vals=$(grep -E "^\s+${field}: " rendered.yaml | awk '{print $2}' | sort -u)
+            echo "${field}: ${vals}"
+            [ "$vals" = "65532" ] || {
+              echo "::error::${field} must be 65532 everywhere, got: ${vals}"; exit 1; }
+          done
+
+      - name: Assert metrics port is not routed by the Ingress
+        run: |
+          if grep -q 'kind: Ingress' rendered.yaml; then
+            if awk '/kind: Ingress/,0' rendered.yaml | grep -q 'number: 9090'; then
+              echo "::error::the Ingress routes to the metrics port"
+              exit 1
+            fi
+          fi
+          echo "ok"
+
+  # ---------------------------------------------------------------------------
+  smoke:
+    name: Smoke (kind)
+    runs-on: ubuntu-24.04
+    needs: [build]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Create kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          cluster_name: onetime-smoke
+          node_image: kindest/node:v${{ env.KUBERNETES_VERSION }}
+
+      - name: Download image artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: image-ci
+          path: /tmp
+
+      - name: Load image into kind
+        run: kind load image-archive /tmp/onetime-ci.tar --name onetime-smoke
+
+      # This is the job that catches what `helm template` cannot:
+      #   * Recreate vs. RollingUpdate against a real volume
+      #   * fsGroup not matching the image UID (first write fails)
+      #   * subPath directories the non-root app cannot write into
+      #   * a keyring the app rejects because the mode came out group-readable
+      #   * the init container failing on a distroless-adjacent base
+      # Any of those show up here as a failed --wait, not as a 3am page.
+      - name: helm install
+        run: |
+          helm upgrade --install onetime deploy/helm/onetime \
+            --namespace onetime --create-namespace \
+            --values deploy/helm/onetime/ci/no-persistence-values.yaml \
+            --set image.registry= \
+            --set image.repository=onetime \
+            --set image.tag=ci \
+            --set image.pullPolicy=Never \
+            --set masterKey.value="v1:$(head -c 32 /dev/urandom | base64)" \
+            --wait --timeout 5m
+
+      - name: helm test
+        run: helm test onetime --namespace onetime --logs
+
+      # A second install over the first exercises the upgrade path, including
+      # the checksum/config annotation that forces the pod to pick up new
+      # values instead of quietly running the old ones.
+      - name: helm upgrade (idempotence)
+        run: |
+          helm upgrade onetime deploy/helm/onetime \
+            --namespace onetime \
+            --values deploy/helm/onetime/ci/no-persistence-values.yaml \
+            --set image.registry= \
+            --set image.repository=onetime \
+            --set image.tag=ci \
+            --set image.pullPolicy=Never \
+            --set masterKey.value="v1:$(head -c 32 /dev/urandom | base64)" \
+            --set config.logLevel=debug \
+            --wait --timeout 5m
+          helm test onetime --namespace onetime --logs
+
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl -n onetime get all,pvc,events --sort-by=.metadata.creationTimestamp || true
+          kubectl -n onetime describe pods || true
+          kubectl -n onetime logs -l app.kubernetes.io/name=onetime --all-containers --tail=200 || true
+          kubectl -n onetime logs -l app.kubernetes.io/name=onetime -c init-fs --tail=100 || true
+
+  # ---------------------------------------------------------------------------
+  # Single required status check, so branch protection does not need updating
+  # every time a job is added or renamed.
+  ci-ok:
+    name: CI
+    runs-on: ubuntu-24.04
+    needs: [lint, test, vuln, secrets, build, helm, smoke]
+    if: always()
+    steps:
+      - name: Verify all jobs succeeded
+        run: |
+          if echo '${{ toJSON(needs) }}' | grep -qE '"result": *"(failure|cancelled)"'; then
+            echo "::error::at least one CI job failed"
+            echo '${{ toJSON(needs) }}'
+            exit 1
+          fi
+          echo "all green"

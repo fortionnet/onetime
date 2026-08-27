@@ -1,0 +1,57 @@
+# gitleaks configuration for onetime.
+#
+# The repository intentionally contains a handful of well-known, publicly
+# documented dev/CI keyrings so that `docker compose up`, `make e2e` and
+# `helm test` work out of the box. They are allowlisted by their exact value
+# rather than by file path — that way anything ELSE that leaks into the same
+# files is still caught.
+
+title = "onetime"
+
+[extend]
+# Keep every upstream rule; only add exceptions.
+useDefault = true
+
+[[rules]]
+id = "onetime-master-keyring"
+description = "onetime master keyring (v<n>:<base64 32 bytes>) committed to the repository"
+# The keyring decrypts every stored secret. A leaked one is not a credential
+# you rotate at leisure — it retroactively exposes everything ever stored.
+regex = '''\bv[0-9]+:[A-Za-z0-9+/]{43}=(?:,v[0-9]+:[A-Za-z0-9+/]{43}=)*'''
+keywords = ["ONETIME_MASTER_KEYS", "master.keys", "masterKey"]
+tags = ["key", "onetime"]
+
+[rules.allowlist]
+regexTarget = "match"
+regexes = [
+  # Local docker-compose stack and `make run` / `make e2e`.
+  # Decodes to "dev-dev-dev-dev-dev-dev-dev-de01".
+  '''v1:ZGV2LWRldi1kZXYtZGV2LWRldi1kZXYtZGV2LWRlMDE=''',
+  # deploy/helm/onetime/ci/*-values.yaml.
+  # Decodes to "ci-only-key-do-not-use-anywhere".
+  '''v1:Y2ktb25seS1rZXktZG8tbm90LXVzZS1hbnl3aGVyZQ==''',
+]
+
+[[allowlists]]
+description = "Known-public dev and CI keyrings (see the rule above for why these are safe)"
+regexTarget = "match"
+regexes = [
+  '''ZGV2LWRldi1kZXYtZGV2LWRldi1kZXYtZGV2LWRlMDE=''',
+  '''Y2ktb25seS1rZXktZG8tbm90LXVzZS1hbnl3aGVyZQ==''',
+  # `dGVzdA==` is base64("test") and shows up in documentation examples.
+  '''dGVzdA==''',
+]
+
+[[allowlists]]
+description = "Documentation showing how to GENERATE a key, not a key itself"
+regexTarget = "line"
+regexes = [
+  '''head -c 32 /dev/urandom \| base64''',
+]
+
+[[allowlists]]
+description = "Lockfiles and vendored dependencies"
+paths = [
+  '''go\.sum''',
+  '''vendor/.*''',
+]
