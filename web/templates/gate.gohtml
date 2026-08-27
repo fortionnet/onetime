@@ -189,10 +189,13 @@
       <span data-body>{{call .T "status.destroyed.body"}}</span>
       <span data-icon>{{template "icon-lock" ""}}</span>
     </div>
-    <div data-variant="too_many_attempts" data-tone="danger">
-      <span data-title>{{call .T "status.destroyed.title"}}</span>
-      <span data-body>{{call .T "status.destroyed.body"}}</span>
-      <span data-icon>{{template "icon-lock" ""}}</span>
+    {{- /* Not "destroyed": five wrong passwords in a row only lock the link
+           for twenty minutes, and the content is still there. Telling the
+           recipient it was deleted sends them away from a link that works. */}}
+    <div data-variant="too_many_attempts" data-tone="warning">
+      <span data-title>{{call .T "status.too_many_attempts.title"}}</span>
+      <span data-body>{{call .T "status.too_many_attempts.body"}}</span>
+      <span data-icon>{{template "icon-pause" ""}}</span>
     </div>
     <div data-variant="expired" data-tone="warning">
       <span data-title>{{call .T "status.expired.title"}}</span>

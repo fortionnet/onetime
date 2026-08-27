@@ -242,7 +242,7 @@ func TestJSONForIsDeterministic(t *testing.T) {
 // show up as literal dotted text on the page.
 func TestKeysUsedByTemplatesExist(t *testing.T) {
 	required := []string{
-		"a11y.skip", "nav.how", "nav.api", "nav.privacy",
+		"a11y.skip", "nav.how", "nav.api", "footer.privacy",
 		"create.h1.pre", "create.h1.mark", "create.h1.post", "create.submit",
 		"create.result.title", "create.result.warn",
 		"gate.h2.text", "gate.h2.file", "gate.cta", "gate.why.body", "gate.noscript",
@@ -253,6 +253,7 @@ func TestKeysUsedByTemplatesExist(t *testing.T) {
 	for _, variant := range []string{
 		"already_read", "expired", "not_found", "burned", "destroyed",
 		"missing_key", "server_error", "rate_limited", "read_only",
+		"too_many_attempts",
 	} {
 		required = append(required, "status."+variant+".title", "status."+variant+".body")
 	}

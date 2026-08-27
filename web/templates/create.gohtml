@@ -44,7 +44,7 @@
         <textarea class="textarea textarea--mono" id="secret-text" name="secret"
                   autofocus autocomplete="off" autocapitalize="off" autocorrect="off"
                   spellcheck="false" aria-describedby="text-hint"
-                  placeholder="{{call .T "create.textarea.hint"}}"></textarea>
+                  placeholder="{{call .T "create.textarea.placeholder"}}"></textarea>
         <p class="hint" id="text-hint">{{call .T "create.textarea.hint"}}</p>
       </div>
 
@@ -113,11 +113,11 @@
             </div>
 
             <div class="input-group is-hidden mt-1" id="ttl-custom-wrap">
-              <label class="sr-only" for="ttl-custom">{{call .T "create.ttl.custom_label"}}</label>
+              <label class="sr-only" for="ttl-custom">{{printf (call .T "create.ttl.custom_label") .TTLMin .TTLMax}}</label>
               <input type="number" class="input input--number input--mono" id="ttl-custom"
                      min="{{.TTLMin}}" max="{{.TTLMax}}" step="1" value="{{.TTLDefault}}"
                      inputmode="numeric">
-              <span class="hint m-0">{{call .T "create.ttl.custom_label"}}</span>
+              <span class="hint m-0">{{printf (call .T "create.ttl.custom_label") .TTLMin .TTLMax}}</span>
               {{- /* The custom field replaces the chips, so without this there
                      is no route back to the presets. */}}
               <button type="button" class="btn btn--ghost btn--small" id="ttl-back">
@@ -171,10 +171,10 @@
         <div class="progress__track">
           <div class="progress__bar" id="progress-bar" role="progressbar"
                aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
-               aria-label="{{call .T "create.submit"}}"></div>
+               aria-label="{{call .T "create.upload.aria"}}"></div>
         </div>
         <p class="progress__meta">
-          <span id="progress-text">{{call .T "create.submit"}}</span>
+          <span id="progress-text">{{call .T "js.uploading"}}</span>
           <button type="button" class="progress__cancel" id="progress-cancel">
             {{call .T "js.upload_cancel"}}
           </button>
