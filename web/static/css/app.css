@@ -1426,6 +1426,13 @@ body.is-result #how {
   display: none;
 }
 
+/* The hero was also what held the card off the header. With it gone the card
+   butts straight up against the border, so the spacing has to be restored
+   explicitly rather than inherited from a section that is no longer there. */
+body.is-result #composer {
+  margin-top: var(--sp-8);
+}
+
 /* h1 for the document outline, h2 for the eye: inside a card this heading is a
    section title, not a page-wide banner. */
 #result h1 {
@@ -2167,4 +2174,14 @@ body.page-gate .main {
     border: 1px solid #000;
     box-shadow: none;
   }
+}
+
+/* The result card puts the retention beside its button. Baseline alignment, so
+   the quiet text sits on the button's text line rather than its box centre. */
+.btn-row--baseline {
+  align-items: baseline;
+}
+
+.btn-row--baseline .hint {
+  margin: 0;
 }

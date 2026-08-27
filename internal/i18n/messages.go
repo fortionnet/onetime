@@ -180,8 +180,7 @@ var cs = map[string]string{
 	"lang.en":          "EN",
 	"footer.privacy":   "Soukromí",
 	"footer.nav_aria":  "Odkazy v patičce",
-	"footer.operator":  "Provozuje Fortion Networks, s.r.o.",
-	"footer.company":   "IČ 26397994 · Smetanovy sady 8, 301 00 Plzeň",
+	"footer.operator":  "Provozuje Fortion Networks, s.r.o., Smetanovy sady 8, 301 00 Plzeň",
 	"footer.api":       "API",
 	"footer.tagline":   "Jednorázové odkazy na hesla a soubory.",
 
@@ -466,8 +465,7 @@ var en = map[string]string{
 	"lang.en":          "EN",
 	"footer.privacy":   "Privacy",
 	"footer.nav_aria":  "Footer links",
-	"footer.operator":  "Operated by Fortion Networks, s.r.o.",
-	"footer.company":   "Company ID 26397994 · Smetanovy sady 8, 301 00 Plzeň, Czech Republic",
+	"footer.operator":  "Operated by Fortion Networks, s.r.o., Smetanovy sady 8, 301 00 Plzeň, Czech Republic",
 	"footer.api":       "API",
 	"footer.tagline":   "One-time links for passwords and files.",
 

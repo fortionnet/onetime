@@ -200,17 +200,18 @@
         </div>
       </div>
 
-      <div class="btn-row mt-4">
+      {{- /* The retention sits beside the button rather than under it. A chip
+             is the visual form for a group of equal labels and on its own reads
+             as the leftover of a row that is gone; as quiet text on the button's
+             own line it is available without competing for attention, and the
+             card loses a stacked row. Filled in by JS. */}}
+      <div class="btn-row btn-row--baseline mt-4">
         <button type="button" class="btn btn--primary" id="copy-link">
           <span id="copy-link-label">{{call .T "create.result.copy"}}</span>
           <span class="btn__arrow" aria-hidden="true">→</span>
         </button>
+        <p class="hint" id="result-expiry"></p>
       </div>
-
-      {{- /* A chip is the visual form for a group of equal labels; on its own it
-             reads as the leftover of a row that is gone. Plain quiet text, so it
-             does not compete with the copy button. Filled in by JS. */}}
-      <p class="hint mt-4" id="result-expiry"></p>
 
       <div class="callout callout--warning mt-5">
         {{template "icon-warning" "callout__icon"}}
