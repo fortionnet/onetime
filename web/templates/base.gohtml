@@ -9,7 +9,7 @@ the "-content" suffix rather than a shared "content" name.
 
 Data keys consumed here (all supplied by the handler):
   Lang T Title BaseURL Version Page AltLangURL CSS JS
-  MaxFileBytes MaxTextBytes TTLMin TTLMax TTLDefault FilesEnabled ReadOnly
+  MaxFileBytes MaxTextBytes TTLMin TTLMax TTLDefault FilesEnabled ReadOnly PassFails
   I18nJSON  — must be template.JS(i18n.JSONFor(Lang)); html/template treats
               <script type="application/json"> as a JS context, so a plain
               string would be re-encoded as a quoted JS string literal.
@@ -37,6 +37,7 @@ Data keys consumed here (all supplied by the handler):
 <body class="page-{{.Page}}" data-page="{{.Page}}" data-base-url="{{.BaseURL}}"
       data-max-file-bytes="{{.MaxFileBytes}}" data-max-text-bytes="{{.MaxTextBytes}}"
       data-ttl-min="{{.TTLMin}}" data-ttl-max="{{.TTLMax}}" data-ttl-default="{{.TTLDefault}}"
+      data-pass-fails="{{.PassFails}}"
       {{if .ReadOnly}}data-read-only="1"{{end}}{{if not .FilesEnabled}} data-files-disabled="1"{{end}}
       {{- if .SecretID}} data-secret-id="{{.SecretID}}"{{end}}
       {{- if .ReceiptID}} data-receipt-id="{{.ReceiptID}}"{{end}}>

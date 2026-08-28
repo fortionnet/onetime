@@ -108,6 +108,13 @@
       <span>{{call .T "gate.revealed.warn"}}</span>
     </div>
 
+    {{- /* The same WebView that swallows a download also refuses the
+           clipboard, so the warning belongs to both branches. */}}
+    <div class="callout callout--info is-hidden mt-4" id="inapp-hint-text">
+      {{template "icon-info" "callout__icon"}}
+      <span>{{call .T "gate.text.inapp"}}</span>
+    </div>
+
     <div id="reveal-text-wrap" class="is-hidden mt-5">
       {{- /* Not inside a live region: an assistive technology must not read a
              one-time secret aloud on its own. The announcement in #sr-status
@@ -120,6 +127,10 @@
           <span class="btn__arrow" aria-hidden="true">→</span>
         </button>
       </div>
+      {{- /* In an in-app WebView the clipboard call fails and resolves anyway.
+             Announcing that only to a live region leaves everyone else looking
+             at a button that appears to have worked. */}}
+      <p class="hint is-hidden" id="copy-fallback" role="alert"></p>
     </div>
 
     <div id="reveal-file-wrap" class="is-hidden mt-5">
@@ -143,9 +154,12 @@
       <p class="hint is-hidden" id="download-done">{{call .T "gate.file.downloaded"}}</p>
     </div>
 
+    {{- /* A new tab: this one holds the only copy of the content, and the
+           link sits exactly where a thumb lands after reading. */}}
     <p class="mt-6">
       {{call .T "gate.revealed.loop"}}
-      <a href="/">{{call .T "gate.revealed.loop_cta"}} <span class="btn__arrow" aria-hidden="true">→</span></a>
+      <a href="/" target="_blank" rel="noopener">{{call .T "gate.revealed.loop_cta"}}
+        <span class="btn__arrow" aria-hidden="true">→</span></a>
     </p>
   </div>
 
@@ -154,6 +168,14 @@
     <span class="status__icon" id="gate-status-icon">{{template "icon-question" ""}}</span>
     <h2 id="gate-status-title"></h2>
     <p class="lead mt-4" id="gate-status-body"></p>
+    {{- /* Filled from the catalog below when the variant carries one. The
+           advice to rotate the password is the most useful thing this page
+           can say, and it used to live only on the server-rendered status
+           page, which the recipient's flow never reaches. */}}
+    <details class="disclosure mt-5 is-hidden" id="gate-status-more">
+      <summary>{{template "icon-chevron" "details__chevron"}}<span id="gate-status-more-summary"></span></summary>
+      <p class="disclosure__body" id="gate-status-more-body"></p>
+    </details>
     <p class="status__cta">
       <a class="btn btn--primary" href="/">{{call .T "status.cta"}}
         <span class="btn__arrow" aria-hidden="true">→</span></a>
@@ -178,6 +200,8 @@
       <span data-title>{{call .T "status.already_read.title"}}</span>
       <span data-body>{{call .T "status.already_read.body"}}</span>
       <span data-icon>{{template "icon-check" ""}}</span>
+      <span data-more-summary>{{call .T "status.already_read.why"}}</span>
+      <span data-more-body>{{call .T "status.already_read.why_body"}}</span>
     </div>
     <div data-variant="burned" data-tone="muted">
       <span data-title>{{call .T "status.burned.title"}}</span>

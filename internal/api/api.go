@@ -167,14 +167,19 @@ func (s *Server) handlePeek(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, peekResponse{
+	resp := peekResponse{
 		Exists:        true,
 		State:         info.State,
 		Kind:          info.Kind,
 		HasPassphrase: info.HasPassphrase,
 		Size:          info.Size,
 		ExpiresAt:     rfc3339(info.ExpiresAt),
-	})
+	}
+	if info.HasPassphrase {
+		left := info.AttemptsLeft
+		resp.AttemptsLeft = &left
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {

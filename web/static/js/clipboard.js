@@ -84,7 +84,13 @@ export async function copyWithFeedback(button, labelEl, text, failEl) {
     return true;
   }
 
+  // Nothing about a silent failure is visible: the clipboard API resolves,
+  // the label keeps saying "Copy" and the reader assumes it worked. On a page
+  // whose content cannot be fetched a second time that assumption costs them
+  // the secret, so the button itself has to carry the bad news.
   const message = t('js.copy_failed');
+  setText(labelEl, t('js.copy_failed_label'));
+  button.dataset.copyFailed = '1';
   if (failEl) {
     setText(failEl, message);
     failEl.classList.remove('is-hidden');

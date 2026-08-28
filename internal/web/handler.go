@@ -241,6 +241,9 @@ func (h *Handler) baseData(r *http.Request, lang string) map[string]any {
 		"TTLDefault":   h.cfg.TTLDefaultDays,
 		"FilesEnabled": h.cfg.EnableFiles,
 		"ReadOnly":     h.cfg.ReadOnly,
+		// The gate counts down passphrase attempts, and the limit is
+		// configurable, so it cannot be a literal in the script.
+		"PassFails": h.cfg.PassphraseWindowFails,
 	}
 }
 
