@@ -332,6 +332,7 @@ var cs = map[string]string{
 	"status.read_only.title":         "Právě probíhá údržba",
 	"status.read_only.body":          "Nové odkazy teď nejdou vytvořit. Čtení funguje dál.",
 	"status.preview.title":           "Někdo vám poslal jednorázový odkaz",
+	"status.preview.page_title":      "Někdo vám poslal jednorázový odkaz · onetime",
 	"status.preview.body":            "Obsah uvidí jen ten, kdo odkaz otevře jako první. Pak se smaže.",
 
 	// -- api docs ----------------------------------------------------------
@@ -650,6 +651,7 @@ var en = map[string]string{
 	"status.read_only.title":         "Maintenance in progress",
 	"status.read_only.body":          "New links cannot be created right now. Reading still works.",
 	"status.preview.title":           "Someone sent you a one-time link",
+	"status.preview.page_title":      "Someone sent you a one-time link · onetime",
 	"status.preview.body":            "Only the first person to open it sees the content. Then it is deleted.",
 
 	// -- api docs ----------------------------------------------------------
