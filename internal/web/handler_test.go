@@ -4,9 +4,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/fortionnet/onetime/internal/config"
+	"github.com/fortionnet/onetime/internal/i18n"
 )
 
 func newDiscardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
@@ -108,5 +110,31 @@ func TestUnprefixedPageRedirectsToALanguage(t *testing.T) {
 	}
 	if got := w.Header().Get("Location"); got != "/en/privacy" {
 		t.Errorf("Location = %q, want %q", got, "/en/privacy")
+	}
+}
+
+// The <title> is what a chat client prints on the unfurl card, so it is the one
+// line of this service most recipients read first. The generic status-page
+// title is wrong there — it describes a dead end, and the link is not one.
+func TestUnfurlCardCarriesThePreviewTitle(t *testing.T) {
+	mux := newTestHandler(t)
+	for _, tc := range []struct {
+		name, path, accept, want string
+	}{
+		{"secret cs", "/s/abcdefghijklmnop", "cs", i18n.T("cs", "status.preview.page_title")},
+		{"secret en", "/s/abcdefghijklmnop", "en", i18n.T("en", "status.preview.page_title")},
+		{"receipt cs", "/m/abcdefghijklmnop", "cs", i18n.T("cs", "status.preview.page_title")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			r.Header.Set("User-Agent", "Slackbot-LinkExpanding 1.0")
+			r.Header.Set("Accept-Language", tc.accept)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, r)
+
+			if want := "<title>" + tc.want + "</title>"; !strings.Contains(w.Body.String(), want) {
+				t.Errorf("body does not contain %q", want)
+			}
+		})
 	}
 }

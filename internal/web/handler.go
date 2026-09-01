@@ -188,21 +188,26 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request, variant string,
 // seeing it in a chat client has a reason to trust the link.
 func (h *Handler) renderPreview(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
-	h.render(w, r, "status", h.language(r), map[string]any{
+	lang := h.language(r)
+	// An unfurler shows the <title>, so the card gets the preview's own wording
+	// rather than the generic status-page title.
+	h.render(w, r, "status", lang, map[string]any{
 		"Page":    "status",
 		"Variant": "preview",
+		"Title":   i18n.T(lang, "status.preview.page_title"),
 	})
 }
 
 func (h *Handler) render(w http.ResponseWriter, r *http.Request, page, lang string, extra map[string]any) {
 	data := h.baseData(r, lang)
-	for k, v := range extra {
-		data[k] = v
-	}
 	// Every page has its own title key; fall back to the site name rather than
-	// rendering a raw key if one is ever missing.
+	// rendering a raw key if one is ever missing. extra is merged afterwards so
+	// that a caller can override the title for one particular render.
 	if title := i18n.T(lang, page+".title"); title != "" && title != page+".title" {
 		data["Title"] = title
+	}
+	for k, v := range extra {
+		data[k] = v
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
