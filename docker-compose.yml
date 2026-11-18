@@ -108,6 +108,10 @@ services:
       ONETIME_RATELIMIT_ENABLED: "false"
 
       ONETIME_DEFAULT_LANG: "cs"
+      # Empty = the brand built into the image. To try another one, mount a
+      # directory with brand.json (see deploy/helm/onetime/README.md#branding)
+      # and point this at it.
+      ONETIME_BRAND_DIR: ""
       ONETIME_LOG_LEVEL: "debug"
       ONETIME_LOG_FORMAT: "text"
 

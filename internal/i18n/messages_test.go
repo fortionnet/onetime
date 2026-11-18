@@ -474,3 +474,35 @@ func TestPlaceholdersSurviveTranslation(t *testing.T) {
 		}
 	}
 }
+
+func TestOverrides(t *testing.T) {
+	t.Cleanup(func() { overrides = nil })
+
+	if err := SetOverrides(map[string]map[string]string{
+		"cs": {"site.name": "tajnosti"},
+		"en": {"js.copied": "Got it"},
+	}); err != nil {
+		t.Fatalf("SetOverrides: %v", err)
+	}
+	if got := T("cs", "site.name"); got != "tajnosti" {
+		t.Errorf("cs site.name = %q", got)
+	}
+	// An override in the default language covers languages without their own.
+	if got := T("en", "site.name"); got != "onetime" {
+		t.Errorf("en site.name = %q, want the English catalog value", got)
+	}
+	if !strings.Contains(JSONFor("en"), `"Got it"`) {
+		t.Error("JSONFor does not carry a js. override to the browser")
+	}
+
+	for _, bad := range []map[string]map[string]string{
+		{"de": {"site.name": "x"}},
+		{"EN": {"site.name": "x"}},
+		{"cs": {"no.such.key": "x"}},
+		{"cs": {"site.name": "  "}},
+	} {
+		if err := ValidateOverrides(bad); err == nil {
+			t.Errorf("ValidateOverrides(%v) accepted an invalid set", bad)
+		}
+	}
+}

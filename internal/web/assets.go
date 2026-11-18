@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"io/fs"
@@ -8,6 +9,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 )
 
 // assets serves the embedded static files with content-addressed URLs.
@@ -17,6 +19,7 @@ import (
 // keep in sync, and nothing that can drift from what is actually being served.
 type assets struct {
 	fsys    fs.FS
+	mem     map[string][]byte // files held in memory, e.g. "brand/logo.svg"
 	hashed  map[string]string // "css/app.css" -> "/static/css/app.<hash>.css"
 	byPath  map[string]string // "css/app.<hash>.css" -> "css/app.css"
 	etag    map[string]string // "css/app.css" -> `"<hash>"`
@@ -30,6 +33,7 @@ func newAssets(fsys fs.FS) *assets {
 		hashed: map[string]string{},
 		byPath: map[string]string{},
 		etag:   map[string]string{},
+		mem:    map[string][]byte{},
 	}
 	// Indexing is best-effort by design. The tree is compiled into the binary,
 	// so a failure here means the build is broken in a way no runtime handling
@@ -46,17 +50,34 @@ func newAssets(fsys fs.FS) *assets {
 			//nolint:nilerr // one unreadable asset must not abandon the whole index
 			return nil
 		}
-		sum := sha256.Sum256(body)
-		digest := hex.EncodeToString(sum[:])[:10]
-		ext := path.Ext(p)
-		stem := strings.TrimSuffix(p, ext)
-		hashedRel := stem + "." + digest + ext
-		a.hashed[p] = "/static/" + hashedRel
-		a.byPath[hashedRel] = p
-		a.etag[p] = `"` + digest + `"`
+		a.index(p, body)
 		return nil
 	})
 	return a
+}
+
+// index records the content-addressed name of one logical path.
+func (a *assets) index(p string, body []byte) {
+	sum := sha256.Sum256(body)
+	digest := hex.EncodeToString(sum[:])[:10]
+	ext := path.Ext(p)
+	stem := strings.TrimSuffix(p, ext)
+	hashedRel := stem + "." + digest + ext
+	a.hashed[p] = "/static/" + hashedRel
+	a.byPath[hashedRel] = p
+	a.etag[p] = `"` + digest + `"`
+}
+
+// addFiles serves files that are not part of the embedded tree — the brand —
+// under prefix, with the same content addressing. They are indexed from the
+// bytes actually served, so a changed logo gets a new URL on the next start
+// and no browser keeps showing the old one.
+func (a *assets) addFiles(prefix string, files map[string][]byte) {
+	for name, body := range files {
+		p := path.Join(prefix, name)
+		a.mem[p] = body
+		a.index(p, body)
+	}
 }
 
 // URL returns the content-addressed URL for a logical asset path.
@@ -101,6 +122,11 @@ func (a *assets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	} else {
 		w.Header().Set("Cache-Control", "no-cache")
+	}
+
+	if body, ok := a.mem[real]; ok {
+		http.ServeContent(w, r, real, time.Time{}, bytes.NewReader(body))
+		return
 	}
 
 	r = r.Clone(r.Context())

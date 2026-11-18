@@ -4,9 +4,9 @@
    Single file, no build step. Order: tokens, reset, primitives, components,
    page blocks, responsive, accessibility overrides.
 
-   Colour rule that shapes several decisions below: --green (#00EA96) sits at
+   Colour rule that shapes several decisions below: --accent (#00EA96 by default) sits at
    1.59:1 on white, so it never carries text or state on a light surface. It is
-   allowed as a highlighter behind dark text, as a fill behind --green-ink, on
+   allowed as a highlighter behind dark text, as a fill behind --accent-ink, on
    navy, and in ::selection. Success *text* uses --success-600.
    ========================================================================== */
 
@@ -15,12 +15,16 @@
    -------------------------------------------------------------------------- */
 
 :root {
-  /* Brand — taken verbatim from fortion.cz */
-  --blue: #0000ff;
-  --blue-deep: #000087;
-  --blue-700: #1f1fa3;
-  --green: #00ea96;
-  --green-ink: #003a26;
+  /* Brand — the default palette (Fortion, taken verbatim from fortion.cz).
+     A brand redefines these tokens, and --font-head/--font-body, in its own
+     stylesheet (brand.json "stylesheet"), linked after this file. Keep the
+     contrast rule in the header note in mind: --accent is a highlight, not a
+     text colour, unless the brand's own accent clears 4.5:1. */
+  --brand: #0000ff;
+  --brand-deep: #000087;
+  --brand-700: #1f1fa3;
+  --accent: #00ea96;
+  --accent-ink: #003a26;
   --ink: #0d0d2a;
   --ink-2: #3b3b56;
   --ink-3: #6c6c87;
@@ -33,8 +37,8 @@
   --max: 1240px;
 
   /* Interaction states */
-  --blue-hover: #1414d6;
-  --blue-active: #0000cc;
+  --brand-hover: #1414d6;
+  --brand-active: #0000cc;
   --disabled-bg: #eaeaf0;
   --disabled-ink: #9a9ab0;
 
@@ -53,14 +57,14 @@
   --danger-700: #96002d;
   --danger-bg: #fff0f3;
   --danger-border: #f7bccb;
-  --info: var(--blue-700);
+  --info: var(--brand-700);
   --info-bg: #f0f0ff;
   --info-border: #c9c9f5;
 
   /* Elevation */
   --shadow-card: 0 2px 8px rgba(13, 13, 42, 0.05);
-  --shadow-lift: 0 12px 28px rgba(0, 0, 255, 0.13), 0 3px 8px rgba(0, 0, 255, 0.07);
-  --shadow-btn: 0 6px 16px rgba(0, 0, 255, 0.22);
+  --shadow-lift: 0 12px 28px color-mix(in srgb, var(--brand) 13%, transparent), 0 3px 8px color-mix(in srgb, var(--brand) 7%, transparent);
+  --shadow-btn: 0 6px 16px color-mix(in srgb, var(--brand) 22%, transparent);
   --shadow-pop: 0 20px 48px rgba(13, 13, 42, 0.16);
 
   /* Spacing scale */
@@ -105,7 +109,7 @@
 
   /* Focus ring, recomputed under prefers-contrast */
   --focus-ring: 3px;
-  --focus-color: color-mix(in oklab, var(--blue) 45%, white);
+  --focus-color: color-mix(in oklab, var(--brand) 45%, white);
 }
 
 /* --------------------------------------------------------------------------
@@ -166,13 +170,13 @@ p {
 }
 
 a {
-  color: var(--blue-700);
+  color: var(--brand-700);
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
 
 a:hover {
-  color: var(--blue);
+  color: var(--brand);
 }
 
 img,
@@ -208,8 +212,8 @@ select {
 }
 
 ::selection {
-  background: var(--green);
-  color: var(--green-ink);
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 
 :focus-visible {
@@ -220,7 +224,7 @@ select {
 
 /* Navy surfaces need a ring that survives a dark background. */
 .navy :focus-visible {
-  outline-color: var(--green);
+  outline-color: var(--accent);
 }
 
 /* --------------------------------------------------------------------------
@@ -322,7 +326,7 @@ select {
 }
 
 .navy .kicker {
-  color: var(--green);
+  color: var(--accent);
 }
 
 .lead {
@@ -333,15 +337,15 @@ select {
 
 /* Highlighter: green sits behind dark text, never carries it. */
 .mark-hl {
-  background: linear-gradient(transparent 62%, var(--green) 62%);
+  background: linear-gradient(transparent 62%, var(--accent) 62%);
   padding-inline: 2px;
 }
 
 /* On navy the highlight would muddy, so the word itself turns green — it is
-   9.78:1 against --blue-deep. */
+   9.78:1 against --brand-deep. */
 .navy .mark-hl {
   background: none;
-  color: var(--green);
+  color: var(--accent);
   padding-inline: 0;
 }
 
@@ -362,7 +366,7 @@ select {
   top: var(--sp-2);
   z-index: var(--z-skip);
   transform: translateY(-200%);
-  background: var(--blue);
+  background: var(--brand);
   color: #fff;
   padding: var(--sp-3) var(--sp-4);
   border-radius: var(--radius-sm);
@@ -424,6 +428,14 @@ select {
   flex: 0 0 auto;
 }
 
+/* Shown instead of the logo when the brand has none. */
+.brand__name {
+  font-family: var(--font-head);
+  font-weight: 600;
+  font-size: 18px;
+  color: var(--ink);
+}
+
 .brand__suffix {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -456,7 +468,7 @@ select {
 
 .nav__link:hover,
 .nav__link[aria-current="page"] {
-  color: var(--blue);
+  color: var(--brand);
 }
 
 .lang {
@@ -527,7 +539,7 @@ select {
 }
 
 .site-footer a:hover {
-  color: var(--blue);
+  color: var(--brand);
   text-decoration: underline;
 }
 
@@ -570,19 +582,19 @@ select {
 }
 
 .btn--primary {
-  background: var(--blue);
+  background: var(--brand);
   color: #fff;
 }
 
 .btn--primary:hover {
-  background: var(--blue-hover);
+  background: var(--brand-hover);
   color: #fff;
   transform: translateY(-1px);
   box-shadow: var(--shadow-btn);
 }
 
 .btn--primary:active {
-  background: var(--blue-active);
+  background: var(--brand-active);
   transform: translateY(0);
   box-shadow: none;
 }
@@ -594,8 +606,8 @@ select {
 }
 
 .btn--ghost:hover {
-  border-color: var(--blue);
-  color: var(--blue);
+  border-color: var(--brand);
+  color: var(--brand);
   transform: translateY(-1px);
 }
 
@@ -661,7 +673,7 @@ select {
 
 .navy .btn--ghost:hover {
   background: color-mix(in oklab, white 14%, transparent);
-  border-color: var(--green);
+  border-color: var(--accent);
   color: #fff;
 }
 
@@ -713,7 +725,7 @@ select {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  background: var(--blue-deep);
+  background: var(--brand-deep);
   color: #fff;
   padding: var(--sp-9) 0;
 }
@@ -726,7 +738,7 @@ select {
   z-index: -1;
   background: radial-gradient(
     60% 50% at 70% 10%,
-    color-mix(in oklab, var(--green) 26%, transparent),
+    color-mix(in oklab, var(--accent) 26%, transparent),
     transparent 70%
   );
   pointer-events: none;
@@ -737,7 +749,7 @@ select {
 }
 
 .navy a {
-  color: var(--green);
+  color: var(--accent);
 }
 
 .glass-grid {
@@ -758,7 +770,7 @@ select {
   font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: 0.1em;
-  color: var(--green);
+  color: var(--accent);
   display: block;
   margin-bottom: var(--sp-3);
 }
@@ -819,7 +831,7 @@ select {
 .textarea:focus {
   outline: none;
   background: var(--bg);
-  border-color: var(--blue);
+  border-color: var(--brand);
   box-shadow: 0 0 0 3px var(--focus-color);
 }
 
@@ -880,13 +892,13 @@ select {
 }
 
 .icon-btn:hover {
-  border-color: var(--blue);
-  color: var(--blue);
+  border-color: var(--brand);
+  color: var(--brand);
 }
 
 .icon-btn[aria-pressed="true"] {
-  border-color: var(--blue);
-  color: var(--blue);
+  border-color: var(--brand);
+  color: var(--brand);
   background: var(--info-bg);
 }
 
@@ -925,7 +937,7 @@ select {
 
 .seg__btn[aria-selected="true"] {
   background: var(--bg);
-  color: var(--blue);
+  color: var(--brand);
   box-shadow: var(--shadow-card);
 }
 
@@ -983,13 +995,13 @@ select {
 }
 
 .chip--radio:hover {
-  border-color: var(--blue);
-  color: var(--blue);
+  border-color: var(--brand);
+  color: var(--brand);
 }
 
 .chip--radio:has(input:checked) {
-  background: var(--blue);
-  border-color: var(--blue);
+  background: var(--brand);
+  border-color: var(--brand);
   color: #fff;
 }
 
@@ -1024,10 +1036,10 @@ select {
 }
 
 /* The one place a green fill is allowed: dark ink on green, 8.08:1. */
-.chip--green {
-  background: var(--green);
-  border-color: var(--green);
-  color: var(--green-ink);
+.chip--accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 600;
 }
 
@@ -1104,7 +1116,7 @@ select {
   list-style: none;
   font-size: 14px;
   font-weight: 500;
-  color: var(--blue-700);
+  color: var(--brand-700);
 }
 
 .disclosure > summary::-webkit-details-marker {
@@ -1112,7 +1124,7 @@ select {
 }
 
 .disclosure > summary:hover {
-  color: var(--blue);
+  color: var(--brand);
 }
 
 .disclosure__body {
@@ -1148,7 +1160,7 @@ select {
 .callout--info {
   border-left-color: var(--info);
   background: var(--info-bg);
-  color: var(--blue-700);
+  color: var(--brand-700);
 }
 
 .callout--success {
@@ -1207,7 +1219,7 @@ select {
 }
 
 .code .tok-str {
-  color: var(--green);
+  color: var(--accent);
 }
 
 .code .tok-key {
@@ -1237,7 +1249,7 @@ select {
 
 .code__copy:hover {
   background: color-mix(in oklab, white 16%, transparent);
-  border-color: var(--green);
+  border-color: var(--accent);
 }
 
 code.inline {
@@ -1317,7 +1329,7 @@ code.inline {
 /* Set on <body> while a file is over the window, so the whole page reacts. */
 body.is-dragging .drop,
 .drop.is-over {
-  border-color: var(--blue);
+  border-color: var(--brand);
   background: var(--info-bg);
 }
 
@@ -1390,7 +1402,7 @@ body.is-dragging .drop,
   height: 100%;
   width: 0;
   border-radius: var(--radius-pill);
-  background: var(--blue);
+  background: var(--brand);
   /* Motion here is information, so it survives reduced-motion. */
   transition: width var(--dur-base) linear;
 }
@@ -1443,8 +1455,8 @@ body.is-result #composer {
   width: 56px;
   height: 56px;
   border-radius: var(--radius-pill);
-  background: var(--green);
-  color: var(--green-ink);
+  background: var(--accent);
+  color: var(--accent-ink);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1497,8 +1509,8 @@ body.page-gate .main {
   width: 56px;
   height: 56px;
   border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--blue) 8%, white);
-  color: var(--blue);
+  background: color-mix(in oklab, var(--brand) 8%, white);
+  color: var(--brand);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1620,7 +1632,7 @@ body.page-gate .main {
 
 .state--new .state__dot {
   background: var(--info-bg);
-  color: var(--blue);
+  color: var(--brand);
   animation: pulse 2s ease-in-out infinite;
 }
 
@@ -1647,10 +1659,10 @@ body.page-gate .main {
 @keyframes pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in oklab, var(--blue) 30%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--brand) 30%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 8px color-mix(in oklab, var(--blue) 0%, transparent);
+    box-shadow: 0 0 0 8px color-mix(in oklab, var(--brand) 0%, transparent);
   }
 }
 
@@ -1812,8 +1824,8 @@ body.page-gate .main {
 
 .toc a:hover,
 .toc a[aria-current="true"] {
-  color: var(--blue);
-  border-left-color: var(--blue);
+  color: var(--brand);
+  border-left-color: var(--brand);
   background: var(--bg-soft);
 }
 
@@ -1846,7 +1858,7 @@ body.page-gate .main {
 }
 
 .endpoint__verb {
-  background: var(--blue);
+  background: var(--brand);
   color: #fff;
   border-radius: 6px;
   padding: 2px 8px;
@@ -2131,7 +2143,7 @@ body.page-gate .main {
     --ink-2: #26263c;
     --ink-3: #4a4a63;
     --focus-ring: 4px;
-    --focus-color: var(--blue);
+    --focus-color: var(--brand);
   }
 
   .card,

@@ -11,6 +11,9 @@ package i18n
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
 	"strings"
 
 	"golang.org/x/text/language"
@@ -73,16 +76,76 @@ func Canonical(lang string) (string, bool) {
 // T translates key into lang. An unknown language falls back to DefaultLang,
 // an unknown key falls back to the Czech string and finally to the key itself,
 // which makes a missing translation loud in the page instead of silent.
+//
+// Overrides installed by SetOverrides win over the catalog at each step.
 func T(lang, key string) string {
-	if m, ok := catalog[normalize(lang)]; ok {
+	l := normalize(lang)
+	if s, ok := overrides[l][key]; ok {
+		return s
+	}
+	if m, ok := catalog[l]; ok {
 		if s, ok := m[key]; ok {
 			return s
 		}
+	}
+	if s, ok := overrides[DefaultLang][key]; ok {
+		return s
 	}
 	if s, ok := catalog[DefaultLang][key]; ok {
 		return s
 	}
 	return key
+}
+
+// overrides replaces catalog entries per language. It is written once by
+// SetOverrides during startup, before any request is served, and only read
+// afterwards, which is why it needs no lock.
+var overrides map[string]map[string]string
+
+// ValidateOverrides checks a set of catalog overrides without installing it:
+// every language must be supported and spelled canonically, every key must
+// already exist in the catalog, and no value may be empty. Accepting unknown
+// keys would let a typo in a brand file pass silently while the page keeps
+// showing the original text.
+func ValidateOverrides(m map[string]map[string]string) error {
+	var errs []string
+	for lang, entries := range m {
+		if canon, ok := Canonical(lang); !ok || canon != lang {
+			errs = append(errs, fmt.Sprintf("unsupported language %q", lang))
+			continue
+		}
+		for k, v := range entries {
+			if _, ok := catalog[DefaultLang][k]; !ok {
+				errs = append(errs, fmt.Sprintf("%s: unknown key %q", lang, k))
+			}
+			if strings.TrimSpace(v) == "" {
+				errs = append(errs, fmt.Sprintf("%s: %q has an empty value", lang, k))
+			}
+		}
+	}
+	if len(errs) > 0 {
+		sort.Strings(errs)
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// SetOverrides installs catalog overrides, replacing any installed before.
+// Call it once at startup, before serving; it is not safe for concurrent use
+// with T.
+func SetOverrides(m map[string]map[string]string) error {
+	if err := ValidateOverrides(m); err != nil {
+		return err
+	}
+	cp := make(map[string]map[string]string, len(m))
+	for lang, entries := range m {
+		cp[lang] = make(map[string]string, len(entries))
+		for k, v := range entries {
+			cp[lang][k] = v
+		}
+	}
+	overrides = cp
+	return nil
 }
 
 // Translator returns a lookup function bound to lang, suitable for handing to
@@ -178,7 +241,7 @@ var cs = map[string]string{
 	"site.name":        "onetime",
 	"site.title":       "onetime – jednorázové odkazy na hesla a soubory",
 	"site.description": "Pošlete heslo nebo soubor odkazem, který jde otevřít jen jednou. Po přečtení se obsah smaže. Bez registrace.",
-	"site.brand_aria":  "Fortion Networks – fortion.cz (otevře se v novém okně)",
+	"site.brand_aria":  "%s – %s (otevře se v novém okně)",
 	"site.home_aria":   "onetime – úvodní stránka",
 	"a11y.skip":        "Přejít na obsah",
 	"nav.aria":         "Hlavní navigace",
@@ -189,7 +252,6 @@ var cs = map[string]string{
 	"lang.en":          "EN",
 	"footer.privacy":   "Soukromí",
 	"footer.nav_aria":  "Odkazy v patičce",
-	"footer.operator":  "Provozuje Fortion Networks, s.r.o., Smetanovy sady 8, 301 00 Plzeň",
 	"footer.api":       "API",
 	"footer.tagline":   "Jednorázové odkazy na hesla a soubory.",
 
@@ -349,7 +411,7 @@ var cs = map[string]string{
 	"api.note.title":         "Poctivá poznámka",
 	"api.note.body":          "Šifrování probíhá na serveru. Klíč je součástí odkazu a hned ho zahazujeme – v databázi je obsah bez odkazu nečitelný.",
 	"api.s.quickstart.title": "Rychlý start",
-	"api.s.quickstart.body":  "Pošlete text, dostanete zpět dva odkazy: jeden pro příjemce a jeden pro sebe. Base URL je onetime.fortion.cloud, všechny endpointy jsou pod /api/v1.",
+	"api.s.quickstart.body":  "Pošlete text, dostanete zpět dva odkazy: jeden pro příjemce a jeden pro sebe. Base URL je %s, všechny endpointy jsou pod /api/v1.",
 	"api.s.quickstart.note":  "Odpověď obsahuje klíč jen jednou – v secret_url za znakem #. Nikde ho neukládáme, takže si ho uložte vy.",
 	"api.s.create.title":     "Vytvoření odkazu",
 	"api.s.create.body":      "Tělo je JSON. Povinný je jen secret; ttl_days je 1 až 30 (výchozí 14) a passphrase je volitelné heslo navíc.",
@@ -418,9 +480,6 @@ var cs = map[string]string{
 	"privacy.tech.3":         "Heslo navíc protahujeme přes Argon2id a neukládáme ho nikde, ani jako hash. Pět špatných pokusů za sebou odkaz na dvacet minut zamkne; po dvaceti pokusech obsah smažeme.",
 	"privacy.tech.4":         "Celý provoz jde přes TLS. Smazání znamená smazání záznamu i zašifrovaného souboru, ne jen příznak v databázi.",
 	"privacy.operator.title": "Provozovatel",
-	"privacy.operator.body":  "Službu provozuje Fortion Networks, s.r.o.",
-	"privacy.operator.addr":  "Smetanovy sady 8, 301 00 Plzeň",
-	"privacy.operator.ico":   "IČO: 26397994 · DIČ: CZ26397994",
 	"privacy.updated":        "Naposledy upraveno: 27. 8. 2026",
 
 	// -- strings shipped to the browser ------------------------------------
@@ -497,7 +556,7 @@ var en = map[string]string{
 	"site.name":        "onetime",
 	"site.title":       "onetime — one-time links for passwords and files",
 	"site.description": "Send a password or a file as a link that opens exactly once. After it is read, the content is deleted. No sign-up.",
-	"site.brand_aria":  "Fortion Networks — fortion.cz (opens in a new window)",
+	"site.brand_aria":  "%s — %s (opens in a new window)",
 	"site.home_aria":   "onetime — home page",
 	"a11y.skip":        "Skip to content",
 	"nav.aria":         "Main navigation",
@@ -508,7 +567,6 @@ var en = map[string]string{
 	"lang.en":          "EN",
 	"footer.privacy":   "Privacy",
 	"footer.nav_aria":  "Footer links",
-	"footer.operator":  "Operated by Fortion Networks, s.r.o., Smetanovy sady 8, 301 00 Plzeň, Czech Republic",
 	"footer.api":       "API",
 	"footer.tagline":   "One-time links for passwords and files.",
 
@@ -668,7 +726,7 @@ var en = map[string]string{
 	"api.note.title":         "An honest note",
 	"api.note.body":          "Encryption happens on the server. The key is part of the link and we throw it away immediately — without the link, the content in our database is unreadable.",
 	"api.s.quickstart.title": "Quick start",
-	"api.s.quickstart.body":  "Send some text, get two links back: one for the recipient and one for yourself. The base URL is onetime.fortion.cloud and every endpoint lives under /api/v1.",
+	"api.s.quickstart.body":  "Send some text, get two links back: one for the recipient and one for yourself. The base URL is %s and every endpoint lives under /api/v1.",
 	"api.s.quickstart.note":  "The response contains the key exactly once — in secret_url, after the #. We never store it, so you have to.",
 	"api.s.create.title":     "Creating a link",
 	"api.s.create.body":      "The body is JSON. Only secret is required; ttl_days is 1 to 30 (default 14) and passphrase is an optional extra password.",
@@ -734,9 +792,6 @@ var en = map[string]string{
 	"privacy.tech.3":         "An extra password is stretched with Argon2id and stored nowhere, not even as a hash. Five wrong attempts in a row lock the link for twenty minutes; after twenty attempts we delete the content.",
 	"privacy.tech.4":         "All traffic runs over TLS. Deleting means deleting the record and the encrypted file, not just flipping a flag in a database.",
 	"privacy.operator.title": "Operator",
-	"privacy.operator.body":  "The service is operated by Fortion Networks, s.r.o., registered in the Czech Republic.",
-	"privacy.operator.addr":  "Smetanovy sady 8, 301 00 Plzeň, Czech Republic",
-	"privacy.operator.ico":   "Company ID: 26397994 · VAT ID: CZ26397994",
 	"privacy.updated":        "Last updated: 27 Aug 2026",
 
 	// -- strings shipped to the browser ------------------------------------

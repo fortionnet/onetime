@@ -11,10 +11,10 @@ VERSION    := $(shell git describe --tags --always --dirty 2>/dev/null || echo d
 COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-MODULE   := github.com/fortionnet/onetime
+MODULE   ?= github.com/fortionnet/onetime
 BINARY   := onetime
 CMD      := ./cmd/onetime
-IMAGE    := ghcr.io/fortionnet/onetime
+IMAGE    ?= ghcr.io/fortionnet/onetime
 CHART    := deploy/helm/onetime
 
 LDFLAGS := -s -w \
@@ -118,7 +118,7 @@ helm-lint: ## Lint and render the chart across the three supported value matrice
 	@# The same three shapes CI checks. values.schema.json rejects a bare base64
 	@# blob as masterKey.value - it must be a real "<id>:<base64>" keyring, so a
 	@# malformed one fails here instead of crash-looping in the cluster.
-	@for f in default external-redis no-persistence; do \
+	@for f in default external-redis no-persistence brand; do \
 		echo "--> $$f"; \
 		helm lint $(CHART) --strict --values $(CHART)/ci/$$f-values.yaml || exit 1; \
 		helm template onetime $(CHART) --values $(CHART)/ci/$$f-values.yaml >/dev/null || exit 1; \

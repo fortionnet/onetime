@@ -237,6 +237,66 @@ default-deny egress would otherwise leave the app permanently not-ready.
 | `extraVolumes` / `extraVolumeMounts` / `extraContainers` | list | `[]` | |
 | `extraObjects` | list | `[]` | Extra manifests (e.g. an ExternalSecret for `masterKey.existingSecret`). Maps are rendered verbatim, strings go through `tpl`. |
 | `tests.enabled` | bool | `true` | `helm test` pod. |
+| `brand.config` | object | `{}` | Rendered as `brand.json`. Empty keeps the brand built into the image. See [Branding](#branding). |
+| `brand.files` | map | `{}` | Text files (SVG, CSS) by name. |
+| `brand.binaryFiles` | map | `{}` | Binary files (PNG, ICO, WOFF2) by name, base64-encoded. |
+| `brand.existingConfigMap` | string | `""` | Mount your own ConfigMap instead; exclusive with the three above. |
+
+---
+
+## Branding
+
+The operator identity is configuration, not code: the same image serves any
+brand. A brand is a directory with `brand.json` and the files it names. The
+chart puts it in a ConfigMap, mounts it at `/etc/onetime/brand` and sets
+`ONETIME_BRAND_DIR`. With `brand.config` empty, the brand built into the image
+is used.
+
+The brand **replaces** the built-in one as a whole. Nothing is merged, so a
+rebranded instance never shows someone else's logo or legal address because a
+file was left out. Anything `brand.json` names but the directory lacks, an
+unknown key, or a file type outside SVG/PNG/WEBP/ICO/CSS/WOFF2 stops the app
+at startup with a message that names the problem.
+
+`brand.json`:
+
+| Key | Meaning |
+| --- | --- |
+| `name` | **Required.** Operator name. Shown instead of the logo when there is none, and in the logo link's label. |
+| `url` | Operator website the logo links to (opens in a new tab). Optional. |
+| `logo.file`, `logo.width`, `logo.height` | Header image and its intrinsic size (rendered 24px high). |
+| `favicon` | SVG, PNG or ICO. |
+| `stylesheet` | CSS linked after the app stylesheet. Redefine the `:root` tokens: `--brand`, `--brand-deep`, `--brand-700`, `--brand-hover`, `--brand-active`, `--accent`, `--accent-ink`, `--font-head`, `--font-body`. |
+| `fonts.stylesheet`, `fonts.fontOrigins` | External font CSS (https) and the origins its font files come from. Both are added to the Content-Security-Policy. Without them, fonts are same-origin only. |
+| `text.<lang>.operator` | Footer line. |
+| `text.<lang>.operator_legal`, `operator_address`, `operator_ids` | "Operator" section of the privacy page. It is omitted when `operator_legal` is missing. |
+| `messages.<lang>.<key>` | Override any UI string by its catalogue key (`internal/i18n/messages.go`), e.g. `site.name`. |
+
+Languages are `cs` and `en`. A `text` key missing in `en` falls back to `cs`.
+
+Supplying the files:
+
+```bash
+# brand-values.yaml holds brand.config; files come straight from disk
+helm upgrade --install onetime oci://ghcr.io/fortionnet/charts/onetime \
+  -f values.yaml -f brand-values.yaml \
+  --set-file brand.files.logo\.svg=./brand/logo.svg \
+  --set-file brand.files.favicon\.svg=./brand/favicon.svg \
+  --set-file brand.files.brand\.css=./brand/brand.css
+
+# binary files are base64 in values
+  --set brand.binaryFiles.logo\.png=$(base64 -w0 ./brand/logo.png)
+
+# or manage the ConfigMap yourself (handles binary files natively)
+kubectl -n onetime create configmap onetime-brand --from-file=./brand/
+helm upgrade ... --set brand.existingConfigMap=onetime-brand
+```
+
+A ConfigMap holds at most 1 MiB, which is plenty for SVG logos and CSS. Load
+fonts from a font CDN rather than shipping them in it. Changes to `brand.*` roll
+the pod via a `checksum/brand` annotation. With `existingConfigMap`, the chart
+cannot see the content, so run `kubectl rollout restart` after changing it.
+`ci/brand-values.yaml` is a complete example.
 
 ---
 

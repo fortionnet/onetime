@@ -446,6 +446,31 @@
     "extraVolumes": { "type": "array", "items": { "type": "object" } },
     "extraVolumeMounts": { "type": "array", "items": { "type": "object" } },
     "extraContainers": { "type": "array", "items": { "type": "object" } },
+    "brand": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Operator identity; see the chart README, section Branding. The app validates brand.json in full at startup.",
+      "properties": {
+        "config": {
+          "type": "object",
+          "description": "Rendered as brand.json.",
+          "properties": {
+            "name": { "type": "string", "minLength": 1 }
+          }
+        },
+        "files": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Za-z0-9][-._A-Za-z0-9]*$" },
+          "additionalProperties": { "type": "string" }
+        },
+        "binaryFiles": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Za-z0-9][-._A-Za-z0-9]*$" },
+          "additionalProperties": { "type": "string", "pattern": "^[A-Za-z0-9+/]*={0,2}$" }
+        },
+        "existingConfigMap": { "type": "string" }
+      }
+    },
     "extraObjects": {
       "type": "array",
       "items": { "type": ["object", "string"] },

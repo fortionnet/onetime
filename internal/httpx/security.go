@@ -13,8 +13,14 @@ import (
 // A per-response nonce is generated for the content security policy so that
 // templates can inline the small amount of bootstrap script they need without
 // opening the door to 'unsafe-inline'. Templates read it with NonceFrom.
-func SecurityHeaders(baseURL string) Middleware {
+//
+// styleOrigins and fontOrigins are the external origins the brand loads its
+// font stylesheet and font files from (internal/brand validates them as bare
+// https origins); with none, styles and fonts are same-origin only.
+func SecurityHeaders(baseURL string, styleOrigins, fontOrigins []string) Middleware {
 	connectSrc := "'self'"
+	extStyle := joinSources(styleOrigins)
+	fontSrc := "font-src 'self'" + joinSources(fontOrigins)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			nonce := randomNonce()
@@ -22,8 +28,8 @@ func SecurityHeaders(baseURL string) Middleware {
 			h.Set("Content-Security-Policy", strings.Join([]string{
 				"default-src 'self'",
 				"script-src 'self' 'nonce-" + nonce + "'",
-				"style-src 'self' 'nonce-" + nonce + "' https://fonts.googleapis.com",
-				"font-src 'self' https://fonts.gstatic.com",
+				"style-src 'self' 'nonce-" + nonce + "'" + extStyle,
+				fontSrc,
 				"img-src 'self' data:",
 				"connect-src " + connectSrc,
 				"form-action 'self'",
@@ -66,4 +72,12 @@ func randomNonce() string {
 		return "static"
 	}
 	return base64.RawStdEncoding.EncodeToString(buf)
+}
+
+// joinSources renders CSP source expressions with a leading space, or nothing.
+func joinSources(origins []string) string {
+	if len(origins) == 0 {
+		return ""
+	}
+	return " " + strings.Join(origins, " ")
 }

@@ -1,0 +1,24 @@
+{
+  "name": "Fortion Networks",
+  "url": "https://fortion.cz",
+  "logo": { "file": "logo.svg", "width": 501, "height": 189 },
+  "favicon": "favicon.svg",
+  "fonts": {
+    "stylesheet": "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap",
+    "fontOrigins": ["https://fonts.gstatic.com"]
+  },
+  "text": {
+    "cs": {
+      "operator": "Provozuje Fortion Networks, s.r.o., Smetanovy sady 8, 301 00 Plzeň",
+      "operator_legal": "Službu provozuje Fortion Networks, s.r.o.",
+      "operator_address": "Smetanovy sady 8, 301 00 Plzeň",
+      "operator_ids": "IČO: 26397994 · DIČ: CZ26397994"
+    },
+    "en": {
+      "operator": "Operated by Fortion Networks, s.r.o., Smetanovy sady 8, 301 00 Plzeň, Czech Republic",
+      "operator_legal": "The service is operated by Fortion Networks, s.r.o., registered in the Czech Republic.",
+      "operator_address": "Smetanovy sady 8, 301 00 Plzeň, Czech Republic",
+      "operator_ids": "Company ID: 26397994 · VAT ID: CZ26397994"
+    }
+  }
+}

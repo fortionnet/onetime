@@ -2,8 +2,8 @@ package web
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
-	"strings"
 	"sync"
 	"text/template"
 
@@ -29,7 +29,7 @@ func (h *Handler) handleLLMs(w http.ResponseWriter, _ *http.Request) {
 			h.llms.err = err
 			return
 		}
-		host := strings.TrimPrefix(strings.TrimPrefix(h.cfg.BaseURL, "https://"), "http://")
+		host := baseHost(h.cfg.BaseURL)
 		var buf bytes.Buffer
 		err = tmpl.Execute(&buf, map[string]any{
 			"BaseURL": h.cfg.BaseURL,
@@ -59,11 +59,19 @@ func (h *Handler) handleLLMs(w http.ResponseWriter, _ *http.Request) {
 	writeBody(w, h.llms.body)
 }
 
+// specPlaceholder is the server URL written into docs/openapi.json. It is
+// replaced with this instance's base URL when served, so a client generated
+// from the spec talks to the instance it was fetched from.
+const specPlaceholder = `"https://onetime.invalid"`
+
 func (h *Handler) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
 	body, err := docs.FS.ReadFile("openapi.json")
 	if err != nil {
 		http.Error(w, "spec unavailable", http.StatusInternalServerError)
 		return
+	}
+	if quoted, err := json.Marshal(h.cfg.BaseURL); err == nil {
+		body = bytes.Replace(body, []byte(specPlaceholder), quoted, 1)
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=300")

@@ -69,8 +69,11 @@ type Config struct {
 	ReadOnly    bool
 
 	DefaultLang string
-	LogLevel    string
-	LogFormat   string
+	// BrandDir is a directory holding brand.json and the files it names. Empty
+	// means the brand compiled into the binary. See internal/brand.
+	BrandDir  string
+	LogLevel  string
+	LogFormat string
 
 	ShutdownTimeout time.Duration
 	StrictStartup   bool
@@ -98,6 +101,7 @@ func Load() (*Config, error) {
 		TmpDir:  env("ONETIME_TMP_DIR", "/data/tmp"),
 
 		DefaultLang: env("ONETIME_DEFAULT_LANG", "cs"),
+		BrandDir:    env("ONETIME_BRAND_DIR", ""),
 		LogLevel:    env("ONETIME_LOG_LEVEL", "info"),
 		LogFormat:   env("ONETIME_LOG_FORMAT", "json"),
 	}

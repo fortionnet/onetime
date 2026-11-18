@@ -45,10 +45,16 @@
   </details>
 
   <section class="mt-6 prose">
-    <h3>{{call .T "privacy.operator.title"}}</h3>
-    <p class="mt-3">{{call .T "privacy.operator.body"}}</p>
-    <p class="hint">{{call .T "privacy.operator.addr"}}</p>
-    <p class="hint">{{call .T "privacy.operator.ico"}}</p>
+    {{- with index .BrandText "operator_legal"}}
+    <h3>{{call $.T "privacy.operator.title"}}</h3>
+    <p class="mt-3">{{.}}</p>
+    {{- with index $.BrandText "operator_address"}}
+    <p class="hint">{{.}}</p>
+    {{- end}}
+    {{- with index $.BrandText "operator_ids"}}
+    <p class="hint">{{.}}</p>
+    {{- end}}
+    {{- end}}
     <p class="hint mt-4">{{call .T "privacy.updated"}}</p>
   </section>
 </div>

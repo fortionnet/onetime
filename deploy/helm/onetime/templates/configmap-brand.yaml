@@ -1,0 +1,24 @@
+{{- if and .Values.brand.config (not .Values.brand.existingConfigMap) -}}
+# The brand: brand.json rendered from brand.config, plus the files it names.
+# Mounted at /etc/onetime/brand; see the "Branding" section of the chart README.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "onetime.brandConfigMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "onetime.labels" . | nindent 4 }}
+data:
+  brand.json: |-
+    {{- .Values.brand.config | toPrettyJson | nindent 4 }}
+  {{- range $name, $body := .Values.brand.files }}
+  {{ $name | quote }}: |-
+    {{- $body | nindent 4 }}
+  {{- end }}
+{{- with .Values.brand.binaryFiles }}
+binaryData:
+  {{- range $name, $b64 := . }}
+  {{ $name | quote }}: {{ $b64 | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

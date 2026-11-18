@@ -1,0 +1,36 @@
+# CI matrix 4: a rebranded instance — brand.config rendered as brand.json,
+# a text file and a binary file. Persistence stays on, so it renders Recreate.
+config:
+  baseURL: https://secrets.example.org
+
+masterKey:
+  value: "v1:Y2ktb25seS1rZXktZG8tbm90LXVzZS1hbnl3aGVyZQ=="
+
+redis:
+  mode: sidecar
+
+persistence:
+  enabled: true
+  size: 1Gi
+
+brand:
+  config:
+    name: Example Corp
+    url: https://example.org
+    logo: { file: logo.svg, width: 160, height: 32 }
+    favicon: favicon.png
+    stylesheet: brand.css
+    fonts:
+      stylesheet: https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap
+      fontOrigins: [https://fonts.gstatic.com]
+    text:
+      en:
+        operator: Operated by Example Corp
+  files:
+    logo.svg: |
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 32"><rect width="160" height="32" fill="#c00"/></svg>
+    brand.css: |
+      :root { --brand: #c00; --brand-deep: #600; }
+  binaryFiles:
+    # 1x1 transparent PNG
+    favicon.png: iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=
