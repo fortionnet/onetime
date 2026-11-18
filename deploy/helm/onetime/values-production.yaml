@@ -94,8 +94,16 @@ ingress:
     # (the NGINX default) the controller spools the whole body to disk on the
     # ingress pod before forwarding it — up to 50 MB of user plaintext on a
     # host this app does not control, does not encrypt and never cleans up.
+    #
+    # `allow all`: the controller denies every customer SSL-VPN pool
+    # (10.90.0.0/16) in http-snippets by default, and customer VPNs that route
+    # 185.175.87.9 into the tunnel (Favi) got a 403 here. Onetime links are how
+    # we hand secrets to customers, so it must open from their VPN too. nginx
+    # does not merge allow/deny across levels: any rule in this location
+    # replaces the http-level default.
     nginx.org/location-snippets: |
       proxy_request_buffering off;
+      allow all;
 
     # A 50 MB transfer to a phone is legitimately slow; the 60s default would
     # cut it off mid-file.
