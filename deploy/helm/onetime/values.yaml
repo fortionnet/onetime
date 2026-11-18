@@ -543,6 +543,46 @@ prometheusRule:
       minimumBaseline: 20
 
 # ---------------------------------------------------------------------------
+# Brand
+# ---------------------------------------------------------------------------
+# -- The operator identity the UI shows: name, logo, favicon, colours, fonts
+# and the legal text in the footer and on the privacy page. Leave everything
+# empty to keep the brand built into the image. Otherwise the brand is replaced
+# as a whole - nothing of the built-in one is kept - so name every file you want.
+# Mounted read-only at /etc/onetime/brand; the pod is rolled when it changes.
+# See "Branding" in the chart README for the full brand.json reference.
+brand:
+  # -- Rendered as brand.json. Required when files/binaryFiles are used.
+  config: {}
+  # name: Example Corp
+  # url: https://example.com
+  # logo: { file: logo.svg, width: 160, height: 32 }
+  # favicon: favicon.svg
+  # stylesheet: brand.css          # redefines --brand*, --accent*, --font-* tokens
+  # fonts:
+  #   stylesheet: https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap
+  #   fontOrigins: [https://fonts.gstatic.com]
+  # text:
+  #   cs: { operator: "Provozuje Example s.r.o., …", operator_legal: "…", operator_address: "…", operator_ids: "IČO: …" }
+  #   en: { operator: "Operated by Example s.r.o., …" }
+  # messages:                      # optional overrides of UI strings, by catalog key
+  #   en: { site.name: secrets }
+
+  # -- Text files by name (SVG, CSS). Easiest from the command line:
+  #   --set-file brand.files.logo\.svg=./brand/logo.svg
+  files: {}
+
+  # -- Binary files by name, base64-encoded (PNG, ICO, WOFF2):
+  #   --set brand.binaryFiles.logo\.png=$(base64 -w0 logo.png)
+  binaryFiles: {}
+
+  # -- Use a ConfigMap you manage instead (brand.json + files as keys), e.g.
+  #   kubectl create configmap onetime-brand --from-file=./brand/
+  # Exclusive with the three values above. The chart cannot see its content, so
+  # restart the pod yourself after changing it.
+  existingConfigMap: ""
+
+# ---------------------------------------------------------------------------
 # Extras
 # ---------------------------------------------------------------------------
 # -- Extra volumes and mounts for the app container.

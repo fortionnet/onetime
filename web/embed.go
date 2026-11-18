@@ -16,3 +16,10 @@ var Templates embed.FS
 //
 //go:embed static
 var Static embed.FS
+
+// Brand holds the default brand: brand.json and the files it names. An
+// operator replaces it as a whole by pointing ONETIME_BRAND_DIR at a directory
+// of the same shape; see internal/brand.
+//
+//go:embed brand
+var Brand embed.FS

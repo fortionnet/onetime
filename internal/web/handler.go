@@ -19,6 +19,7 @@ import (
 
 	webassets "github.com/fortionnet/onetime/web"
 
+	"github.com/fortionnet/onetime/internal/brand"
 	"github.com/fortionnet/onetime/internal/config"
 	"github.com/fortionnet/onetime/internal/httpx"
 	"github.com/fortionnet/onetime/internal/i18n"
@@ -34,19 +35,22 @@ const langCookie = "lang"
 // itself on every request or format numbers in only one language.
 type Handler struct {
 	cfg    *config.Config
+	brand  *brand.Brand
 	tmpl   map[string]*template.Template
 	assets *assets
 	log    *slog.Logger
 	llms   llmsDoc
 }
 
-// New parses the templates and prepares the asset index.
-func New(cfg *config.Config, log *slog.Logger) (*Handler, error) {
+// New parses the templates and prepares the asset index. The brand's files are
+// served under /static/brand/.
+func New(cfg *config.Config, b *brand.Brand, log *slog.Logger) (*Handler, error) {
 	static, err := fs.Sub(webassets.Static, "static")
 	if err != nil {
 		return nil, err
 	}
-	h := &Handler{cfg: cfg, assets: newAssets(static), log: log, tmpl: map[string]*template.Template{}}
+	h := &Handler{cfg: cfg, brand: b, assets: newAssets(static), log: log, tmpl: map[string]*template.Template{}}
+	h.assets.addFiles("brand", b.Files())
 
 	for _, lang := range i18n.Supported() {
 		tmpl, err := template.New("").Funcs(template.FuncMap{
@@ -103,7 +107,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 }
 
 // handleRoot sends a browser to its language and a command-line client straight
-// to the usage text. Someone who runs `curl https://onetime.fortion.cloud`
+// to the usage text. Someone who runs `curl https://<this host>`
 // almost certainly wants to know how to use it, not an HTML page.
 func (h *Handler) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if httpx.PrefersPlainText(r) {
@@ -232,6 +236,10 @@ func (h *Handler) baseData(r *http.Request, lang string) map[string]any {
 		"T":            t,
 		"Title":        t("site.title"),
 		"BaseURL":      h.cfg.BaseURL,
+		"Host":         baseHost(h.cfg.BaseURL),
+		"Brand":        h.brand,
+		"BrandText":    h.brand.TextFor(lang),
+		"BrandAsset":   h.brandAsset,
 		"Version":      Version,
 		"Nonce":        httpx.NonceFrom(r.Context()),
 		"AltLangURL":   altLangURL(r, lang),
@@ -376,4 +384,19 @@ func humanBytes(n int64, lang string) string {
 		value = strings.Replace(value, ".", ",", 1)
 	}
 	return value + " " + []string{"kB", "MB", "GB", "TB"}[exp]
+}
+
+// brandAsset returns the URL of a file in the brand directory, or "" when the
+// brand does not name one, so a template can test the result with {{with}}.
+func (h *Handler) brandAsset(name string) string {
+	if name == "" {
+		return ""
+	}
+	return h.assets.URL("brand/" + name)
+}
+
+// baseHost is the configured base URL without its scheme, the form people
+// read and type.
+func baseHost(baseURL string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(baseURL, "https://"), "http://")
 }

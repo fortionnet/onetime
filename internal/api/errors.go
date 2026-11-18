@@ -15,7 +15,7 @@ import (
 // genuinely needs to know which happened and a 256-bit id makes the disclosure
 // harmless. A missing confirmation and a wrong passphrase both come back
 // without consuming anything, so a retry is always possible.
-func problemFor(err error) httpx.Problem {
+func problemFor(err error, baseURL string) httpx.Problem {
 	switch {
 	case errors.Is(err, secret.ErrNotFound):
 		return httpx.Problem{Status: http.StatusNotFound, Code: httpx.CodeNotFound,
@@ -58,7 +58,7 @@ func problemFor(err error) httpx.Problem {
 			Detail: "Revealing destroys the content, so it needs a deliberate action. " +
 				`Send {"confirm":true} to proceed.`,
 			Example: `printf '{"key":"%s","confirm":true}' "$KEY" | curl -sS -X POST ` +
-				`-H 'Content-Type: application/json' --data-binary @- https://onetime.fortion.cloud/api/v1/reveal`}
+				`-H 'Content-Type: application/json' --data-binary @- ` + baseURL + `/api/v1/reveal`}
 
 	case errors.Is(err, secret.ErrTooLarge):
 		return httpx.Problem{Status: http.StatusRequestEntityTooLarge, Code: httpx.CodePayloadTooLarge,

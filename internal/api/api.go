@@ -358,7 +358,7 @@ func (s *Server) allow(w http.ResponseWriter, r *http.Request, action ratelimit.
 }
 
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
-	p := problemFor(err)
+	p := problemFor(err, s.cfg.BaseURL)
 	if p.Status >= 500 {
 		s.log.Error("request failed",
 			"request_id", httpx.RequestIDFrom(r.Context()), "route", r.Pattern, "error", err)

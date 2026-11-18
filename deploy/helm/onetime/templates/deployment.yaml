@@ -30,6 +30,10 @@ spec:
         # changes nothing, which is the worst kind of green.
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret-masterkey.yaml") . | sha256sum }}
+        {{- if .Values.brand.config }}
+        # The brand is read once at startup, so a new logo needs a new pod too.
+        checksum/brand: {{ include (print $.Template.BasePath "/configmap-brand.yaml") . | sha256sum }}
+        {{- end }}
         kubectl.kubernetes.io/default-container: onetime
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -192,6 +196,11 @@ spec:
               mountPath: /run/secrets/onetime-redis
               readOnly: true
             {{- end }}
+            {{- if include "onetime.brandEnabled" . }}
+            - name: brand
+              mountPath: /etc/onetime/brand
+              readOnly: true
+            {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -284,6 +293,12 @@ spec:
             items:
               - key: {{ .Values.redis.external.passwordKey }}
                 path: password
+        {{- end }}
+        {{- if include "onetime.brandEnabled" . }}
+        - name: brand
+          configMap:
+            name: {{ include "onetime.brandConfigMapName" . }}
+            defaultMode: 0444
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

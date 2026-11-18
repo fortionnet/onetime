@@ -92,7 +92,7 @@ func newTestServer(t *testing.T) *testServer {
 // real server so that tests exercise the same stack.
 func (ts *testServer) do(r *http.Request) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
-	handler := httpx.Chain(ts.mux, httpx.RequestID, httpx.RejectSecretInQuery)
+	handler := httpx.Chain(ts.mux, httpx.RequestID, httpx.RejectSecretInQuery(ts.cfg.BaseURL))
 	handler.ServeHTTP(w, r)
 	return w
 }

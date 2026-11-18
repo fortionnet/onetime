@@ -8,7 +8,8 @@ parsed into one template set, so block names have to be unique per page — henc
 the "-content" suffix rather than a shared "content" name.
 
 Data keys consumed here (all supplied by the handler):
-  Lang T Title BaseURL Version Page AltLangURL CSS JS
+  Lang T Title BaseURL Host Version Page AltLangURL CSS JS
+  Brand (*brand.Brand)  BrandText (operator text for Lang)  BrandAsset (func)
   MaxFileBytes MaxTextBytes TTLMin TTLMax TTLDefault FilesEnabled ReadOnly PassFails
   I18nJSON  — must be template.JS(i18n.JSONFor(Lang)); html/template treats
               <script type="application/json"> as a JS context, so a plain
@@ -28,11 +29,22 @@ Data keys consumed here (all supplied by the handler):
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
 {{- end}}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+{{- with .Brand.Fonts.Stylesheet}}
+{{- range $.Brand.StyleOrigins}}
+<link rel="preconnect" href="{{.}}">
+{{- end}}
+{{- range $.Brand.FontOrigins}}
+<link rel="preconnect" href="{{.}}" crossorigin>
+{{- end}}
+<link rel="stylesheet" href="{{.}}">
+{{- end}}
 <link rel="stylesheet" href="{{.CSS}}">
-<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+{{- with call .BrandAsset .Brand.Stylesheet}}
+<link rel="stylesheet" href="{{.}}">
+{{- end}}
+{{- with call .BrandAsset .Brand.Favicon}}
+<link rel="icon" href="{{.}}">
+{{- end}}
 </head>
 <body class="page-{{.Page}}" data-page="{{.Page}}" data-base-url="{{.BaseURL}}"
       data-max-file-bytes="{{.MaxFileBytes}}" data-max-text-bytes="{{.MaxTextBytes}}"
@@ -79,6 +91,18 @@ Data keys consumed here (all supplied by the handler):
 {{- /* Header. The gate page deliberately has no navigation: the recipient
        has exactly one decision to make and every other link is a way to
        lose the content. */ -}}
+{{- /* The operator's mark: the brand logo, or its name when there is none.
+       alt="" on purpose when linked: the link already carries the accessible
+       name, and a named image inside it would be announced twice. */ -}}
+{{define "brand-mark" -}}
+{{- with call .BrandAsset .Brand.Logo.File -}}
+<img class="brand__mark" src="{{.}}" alt="{{if not $.Brand.URL}}{{$.Brand.Name}}{{end}}"
+     width="{{$.Brand.Logo.Width}}" height="{{$.Brand.Logo.Height}}" decoding="async">
+{{- else -}}
+<span class="brand__name">{{.Brand.Name}}</span>
+{{- end -}}
+{{- end}}
+
 {{define "site-header" -}}
 <header class="site-header">
   <div class="wrap site-header__inner">
@@ -88,13 +112,14 @@ Data keys consumed here (all supplied by the handler):
            current tab holds something that cannot be fetched again, and a
            same-tab navigation would destroy it. */}}
     <div class="brand">
-      <a class="brand__logo" href="https://fortion.cz" target="_blank" rel="noopener"
-         aria-label="{{call .T "site.brand_aria"}}">
-        {{- /* alt="" on purpose: the link already carries the accessible name,
-               and a named image inside it would be announced twice. */}}
-        <img class="brand__mark" src="{{asset "img/fortion-blue.svg"}}" alt=""
-             width="501" height="189" decoding="async">
+      {{- if .Brand.URL}}
+      <a class="brand__logo" href="{{.Brand.URL}}" target="_blank" rel="noopener"
+         aria-label="{{printf (call .T "site.brand_aria") .Brand.Name .Brand.Host}}">
+        {{- template "brand-mark" .}}
       </a>
+      {{- else}}
+      <span class="brand__logo">{{template "brand-mark" .}}</span>
+      {{- end}}
       <a class="brand__suffix" href="/{{.Lang}}/" aria-label="{{call .T "site.home_aria"}}">{{call .T "site.name"}}</a>
     </div>
 
@@ -136,7 +161,9 @@ Data keys consumed here (all supplied by the handler):
 {{- if ne .Page "gate"}}
 <footer class="site-footer">
   <div class="wrap site-footer__inner">
-    <p class="site-footer__legal">{{call .T "footer.operator"}}</p>
+    {{- with index .BrandText "operator"}}
+    <p class="site-footer__legal">{{.}}</p>
+    {{- end}}
     <nav class="site-footer__links" aria-label="{{call .T "footer.nav_aria"}}">
       <a href="/{{.Lang}}/privacy">{{call .T "footer.privacy"}}</a>
       <span class="site-footer__sep" aria-hidden="true">·</span>

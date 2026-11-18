@@ -133,6 +133,21 @@ secrety a rozšířila dopad případného úniku z dnů (TTL) na týdny (retenc
 záloh). Jediná nenahraditelná věc je master keyring — ten patří do password
 manageru.
 
+## Vlastní značka
+
+Jméno provozovatele, logo, favicon, barvy, fonty i text v patičce a na stránce
+o soukromí jsou konfigurace, ne kód: stejný image poslouží komukoli. Značka je
+adresář s `brand.json` a soubory, na které odkazuje. Ukazuje na něj
+`ONETIME_BRAND_DIR`; bez něj se použije výchozí značka zabudovaná v image
+(`web/brand/`). V Helm chartu jsou na to hodnoty `brand.*` — popis a příklad
+jsou v [`deploy/helm/onetime/README.md`](deploy/helm/onetime/README.md#branding).
+
+Fork kvůli jiné značce není potřeba. Kdo forkuje z jiného důvodu, ať
+**nepřejmenovává Go modul** (`github.com/fortionnet/onetime`): přejmenování se
+propíše do importů ve všech souborech a každý merge z upstreamu pak končí
+konflikty. Registry obrazu a modul jdou v `Makefile` přepsat
+(`make image IMAGE=ghcr.io/<org>/onetime`).
+
 ## Licence
 
 Apache-2.0

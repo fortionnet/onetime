@@ -217,6 +217,9 @@ in production.
 ONETIME_LISTEN_ADDR: {{ printf ":%d" (int .Values.config.listenPort) | quote }}
 ONETIME_METRICS_ADDR: {{ printf ":%d" (int .Values.config.metricsPort) | quote }}
 ONETIME_BASE_URL: {{ .Values.config.baseURL | quote }}
+{{- if include "onetime.brandEnabled" . }}
+ONETIME_BRAND_DIR: "/etc/onetime/brand"
+{{- end }}
 
 ONETIME_MASTER_KEYS_FILE: {{ include "onetime.masterKeyPath" . | quote }}
 
@@ -349,6 +352,18 @@ runtime in a way that costs data.
 {{- fail "\n\nonetime: config.strictStartup=true requires masterKey.hardenPermissions=true.\n\nKubernetes mounts Secret volumes as root:<fsGroup> and, when fsGroup is set, ORs group-read\ninto the file mode - so even defaultMode 0400 lands as 0440. The app's startup check rejects\nanything readable by group or other, so it would crash-loop.\n\nmasterKey.hardenPermissions=true adds an init container that copies the keyring as uid 65532\nand chmods it to 0400, which satisfies both. Only set hardenPermissions=false if you also set\nconfig.strictStartup=false, and understand you are accepting a group-readable keyring.\n" -}}
 {{- end -}}
 
+{{- if and .Values.brand.existingConfigMap (or .Values.brand.config .Values.brand.files .Values.brand.binaryFiles) -}}
+{{- fail "\n\nonetime: brand.existingConfigMap cannot be combined with brand.config, brand.files or brand.binaryFiles.\n\nEither the chart renders the brand ConfigMap from those values, or you bring your own; the\nchart will not merge the two.\n" -}}
+{{- end -}}
+
+{{- if or (hasKey .Values.brand.files "brand.json") (hasKey .Values.brand.binaryFiles "brand.json") -}}
+{{- fail "\n\nonetime: brand.json is rendered from brand.config; do not pass it under brand.files.\n" -}}
+{{- end -}}
+
+{{- if and (or .Values.brand.files .Values.brand.binaryFiles) (not .Values.brand.config) -}}
+{{- fail "\n\nonetime: brand.files/brand.binaryFiles need brand.config.\n\nbrand.config becomes brand.json, which names the logo, favicon and stylesheet; files nothing\nnames are never shown. At minimum: brand.config.name.\n" -}}
+{{- end -}}
+
 {{- if and .Values.ingress.enabled (not .Values.ingress.host) -}}
 {{- fail "\n\nonetime: ingress.enabled=true requires ingress.host.\n" -}}
 {{- end -}}
@@ -369,4 +384,16 @@ runtime in a way that costs data.
 {{- fail "\n\nonetime: podDisruptionBudget.minAvailable with replicaCount=1 permanently blocks `kubectl drain`.\n\nThe single pod can never be evicted, so node maintenance hangs until someone deletes the PDB\nby hand - usually at 3am, by someone who did not write this chart. Use maxUnavailable: 1\n(which is a no-op at one replica, which is the honest answer) or leave the PDB disabled.\n" -}}
 {{- end -}}
 
+{{- end -}}
+
+{{/*
+Brand. Enabled when the chart renders a brand ConfigMap or one is supplied;
+otherwise the image's built-in brand is used and nothing is mounted.
+*/}}
+{{- define "onetime.brandEnabled" -}}
+{{- if or .Values.brand.existingConfigMap .Values.brand.config -}}true{{- end -}}
+{{- end -}}
+
+{{- define "onetime.brandConfigMapName" -}}
+{{- .Values.brand.existingConfigMap | default (printf "%s-brand" (include "onetime.fullname" .)) -}}
 {{- end -}}

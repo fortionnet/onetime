@@ -122,28 +122,33 @@ func Timeout(d time.Duration, exempt func(*http.Request) bool) Middleware {
 // logs, browser history and referrer headers, and there is no taking it back.
 // Rather than quietly accepting it, we fail loudly and tell the caller the
 // value they just sent has to be treated as compromised.
-func RejectSecretInQuery(next http.Handler) http.Handler {
+//
+// baseURL is this instance's origin, quoted in the corrective example.
+func RejectSecretInQuery(baseURL string) Middleware {
 	suspect := []string{"secret", "value", "password", "passphrase", "key", "token", "pass"}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.RawQuery != "" {
-			q := r.URL.Query()
-			for _, name := range suspect {
-				if v := q.Get(name); v != "" {
-					WriteProblem(w, r, Problem{
-						Status: http.StatusBadRequest,
-						Code:   CodeSecretInQuery,
-						Title:  "Secrets must not travel in the URL",
-						Detail: "The value you just sent in the query string appeared in the URL and must be " +
-							"considered compromised. Rotate it, then send it in the request body instead.",
-						Example: "printf %s \"$VALUE\" | curl -sS --data-binary @- " +
-							"-H 'Content-Type: text/plain' https://onetime.fortion.cloud/api/v1/secret",
-					})
-					return
+	example := "printf %s \"$VALUE\" | curl -sS --data-binary @- " +
+		"-H 'Content-Type: text/plain' " + baseURL + "/api/v1/secret"
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.RawQuery != "" {
+				q := r.URL.Query()
+				for _, name := range suspect {
+					if v := q.Get(name); v != "" {
+						WriteProblem(w, r, Problem{
+							Status: http.StatusBadRequest,
+							Code:   CodeSecretInQuery,
+							Title:  "Secrets must not travel in the URL",
+							Detail: "The value you just sent in the query string appeared in the URL and must be " +
+								"considered compromised. Rotate it, then send it in the request body instead.",
+							Example: example,
+						})
+						return
+					}
 				}
 			}
-		}
-		next.ServeHTTP(w, r)
-	})
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // WarnOnIgnoredForwarding reports, at most once a minute, that forwarding

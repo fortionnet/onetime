@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fortionnet/onetime/internal/brand"
 	"github.com/fortionnet/onetime/internal/config"
 	"github.com/fortionnet/onetime/internal/i18n"
 )
@@ -15,11 +16,20 @@ func newDiscardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func newTestHandler(t *testing.T) http.Handler {
 	t.Helper()
+	b, err := brand.Default()
+	if err != nil {
+		t.Fatalf("brand.Default: %v", err)
+	}
+	return newTestHandlerWith(t, b)
+}
+
+func newTestHandlerWith(t *testing.T, b *brand.Brand) http.Handler {
+	t.Helper()
 	h, err := New(&config.Config{
 		BaseURL:     "https://onetime.example",
 		DefaultLang: "cs",
 		EnableFiles: true,
-	}, newDiscardLogger())
+	}, b, newDiscardLogger())
 	if err != nil {
 		t.Fatalf("web.New: %v", err)
 	}

@@ -19,9 +19,11 @@ import (
 
 	"github.com/fortionnet/onetime/internal/api"
 	"github.com/fortionnet/onetime/internal/blob"
+	"github.com/fortionnet/onetime/internal/brand"
 	"github.com/fortionnet/onetime/internal/config"
 	"github.com/fortionnet/onetime/internal/crypto"
 	"github.com/fortionnet/onetime/internal/httpx"
+	"github.com/fortionnet/onetime/internal/i18n"
 	"github.com/fortionnet/onetime/internal/observability"
 	"github.com/fortionnet/onetime/internal/ratelimit"
 	"github.com/fortionnet/onetime/internal/secret"
@@ -32,6 +34,7 @@ import (
 // app is everything the server needs, assembled once at startup.
 type app struct {
 	cfg     *config.Config
+	brand   *brand.Brand
 	log     *slog.Logger
 	store   *store.Redis
 	blobs   *blob.Store
@@ -132,6 +135,18 @@ func setup(ctx context.Context) (*app, error) {
 	if validateErr := cfg.Validate(); validateErr != nil {
 		return nil, validateErr
 	}
+
+	// A brand that does not load is a deployment mistake, not something to
+	// serve around: falling back to the default would put another operator's
+	// name and legal address on this instance.
+	b, err := brand.Load(cfg.BrandDir)
+	if err != nil {
+		return nil, err
+	}
+	if msgErr := i18n.SetOverrides(b.Messages); msgErr != nil {
+		return nil, fmt.Errorf("brand messages: %w", msgErr)
+	}
+	log.Info("brand loaded", "name", b.Name, "dir", cfg.BrandDir)
 
 	keys, err := cfg.MasterKeys()
 	if err != nil {
@@ -239,7 +254,7 @@ func setup(ctx context.Context) (*app, error) {
 	}
 
 	a := &app{
-		cfg: cfg, log: log, store: st, blobs: blobs, svc: svc,
+		cfg: cfg, brand: b, log: log, store: st, blobs: blobs, svc: svc,
 		limiter: limiter, metrics: metrics, health: health, reg: reg,
 	}
 	health.SetStarted(a.started.Load)
@@ -253,7 +268,7 @@ func (a *app) router() http.Handler {
 	apiSrv.Register(mux)
 
 	web.Version = version
-	webSrv, err := web.New(a.cfg, a.log)
+	webSrv, err := web.New(a.cfg, a.brand, a.log)
 	if err != nil {
 		a.log.Error("could not prepare the web UI; serving the API only", "error", err)
 	} else {
@@ -274,8 +289,8 @@ func (a *app) router() http.Handler {
 		httpx.Recover(a.log),
 		httpx.AccessLog(a.log, a.cfg.TrustedProxies, "truncated"),
 		httpx.WarnOnIgnoredForwarding(a.log, a.cfg.TrustedProxies),
-		httpx.SecurityHeaders(a.cfg.BaseURL),
-		httpx.RejectSecretInQuery,
+		httpx.SecurityHeaders(a.cfg.BaseURL, a.brand.StyleOrigins(), a.brand.FontOrigins()),
+		httpx.RejectSecretInQuery(a.cfg.BaseURL),
 		a.observe,
 		noStoreExceptAssets,
 		httpx.Timeout(30*time.Second, func(r *http.Request) bool {
